@@ -26,6 +26,8 @@ from __future__ import print_function, unicode_literals
 
 __version_info__ = (0, 1, 0)
 
+DEFAULT_INSTANCEPATH='~/runserval'
+
 import logging
 _logger = logging.getLogger(__name__)
 
@@ -40,37 +42,136 @@ except ImportError:
     from ttk import *
     import tkMessageBox
 import meshy
-import subprocess
 
 def text_replace(widget, text):
     widget.delete('1.0', 'end')
     widget.insert('1.0', text)
 
-    
+
+class DaemonController(object):
+    def __init__(self, parent, main_obj):
+        self.main = main_obj
+
+        # --- Styles ---
+        s = Style()
+        s.configure('broken.ServaldFrame.TLabelframe', background='#DA3E3E')
+        s.configure('running.ServaldFrame.TLabelframe', background='#4BC04B')
+        #Style().configure('TLabel', background='red', foreground='white')
+        #~ print(toolbar['style'])
+        #~ print(toolbar.winfo_class()) #TLabelframe
+        #~ print(Style().layout('TLabelframe'))
+        #~ print(Style().element_options('TLabelframe'))
+        #~ print(s.lookup('TLabel', 'background'))
+
+        self.indicator = Frame(parent,
+                        padding=10,
+                        relief=FLAT,
+                        )
+        self.indicator.pack(fill=BOTH)
+        # TODO: Set minimum width for Entry field
+        toolbar = Frame(self.indicator, padding=1)
+        toolbar.pack(fill=BOTH)
+
+        start_servald_btn = Button(toolbar, text='Start servald',
+                                   command=self.cmd_start_servald)
+        start_servald_btn.grid(row=0, column=0, padx=(0,2))
+        stop_servald_btn = Button(toolbar, text='Stop',
+                        command=self.cmd_stop_servald)
+        stop_servald_btn.grid(row=0, column=1, padx=2)
+        status_btn = Button(toolbar, text='Status',
+                            command=self.cmd_servald_status)
+        status_btn.grid(row=0, column=2, padx=2)
+
+        cmd_frame = Frame(toolbar)
+        cmd_frame.grid(row=0, column=3, sticky=W)
+        toolbar.columnconfigure(3, weight=1)
+
+        label = Label(cmd_frame, text='command:')
+        label.grid(row=0, column=0, sticky=E)
+
+        self.servalcmd = StringVar()
+        # TODO:Dynamically modify text size on window resize
+        entry = Entry(cmd_frame, textvariable=self.servalcmd, width=40)
+        entry.grid(row=0, column=1, sticky=W)
+        btn = Button(cmd_frame, text='Run', default=ACTIVE, command=self.cmd_run_servalcmd)
+        btn.grid(row=0, column=2)
+
+        #entry.bind('<Return>', self.cmd_run_servalcmd)
+        entry.bind('<Return>', lambda e: btn.invoke())
+        entry.focus()
+
+        self.indicator['style'] = 'broken.ServaldFrame.TLabelframe'
+        try:
+            self.servald = meshy.Servald(
+                                    instancepath=DEFAULT_INSTANCEPATH)
+            #self.servald = meshy.Servald()
+            parent['text'] = 'Local servald : ' + self.servald.instancepath
+            res, out = self.servald.exec_cmd(['status'])
+            if res == 0:
+                self.indicator['style'] = 'running.ServaldFrame.TLabelframe'
+        except meshy.ServalError:
+            self.main.output('Unable to initialise serval. Please check the '
+                'serval logs for details')
+
+    def cmd_run_servalcmd(self, *ign):
+        cmd = self.servalcmd.get().split()
+        res, out = self.servald.exec_cmd(cmd)
+        #TODO:Get unicode output from meshy
+        out = out.decode('utf8')
+        self.main.output('Exit code:{}\n{}'.format(res, out))
+
+    def cmd_servald_status(self):
+        res, out = self.servald.exec_cmd(['status'])
+        #TODO:Get unicode output from meshy
+        out = out.decode('utf8')
+        self.main.output('Exit code:{}\n{}'.format(res, out))
+
+    def cmd_stop_servald(self, *ignore):
+        res, out = self.servald.stop_running_daemon()
+        if res == 0:
+            self.indicator['style'] = 'ServaldFrame.TLabelframe'
+        else:
+            self.indicator['style'] = 'broken.ServaldFrame.TLabelframe'
+            self.main.output('Exit code:{}\n{}'.format(res, out))
+            
+
+    def cmd_start_servald(self, *ignore):
+        try:
+            self.servald.start()
+            self.indicator['style'] = 'running.ServaldFrame.TLabelframe'
+        except meshy.ServalError:
+            self.indicator['style'] = 'broken.ServaldFrame.TLabelframe'
+
+
 class MainWindow(object):
 
+    def output(self, textdata):
+        text_replace(self.output_w, textdata)
+        
     def cmd_ZZdujour(self, *args):
-        rhizome = self.servald.get_rhizome()
-        text_replace(self.output, repr(rhizome.bundles).decode('utf8'))
-        #subprocess.call()
+        rhizome = self.daemon_controller.servald.get_rhizome()
+        #TODO:Get unicode output from meshy
+        self.output(repr(rhizome.bundles).decode('utf8'))
         
     def __init__(self, root):
-        self.servald = meshy.Servald(instancepath='runserval')
-
         # --- Tk init ---
         self.root = root
         self.root.title('MeshTool')
-        self.root.geometry('800x600')
+        #self.root.geometry('800x600')
 
         # Catch the close button
-        self.root.protocol("WM_DELETE_WINDOW", self.cmd_quit)
+        #self.root.protocol("WM_DELETE_WINDOW", self.cmd_quit)
         # Catch the "quit" event.
-        self.root.createcommand('exit', self.cmd_quit)
+        #self.root.createcommand('exit', self.cmd_quit)
 
-        self.root.option_add('*tearOff', FALSE)
+        self.root.option_add('*tearOff', False)
+        #root.bind('<Return>', self.cmd_ZZdujour)
+
+        # --- Menu ---
+
         #~ menu = Menu(root)
         #~ root.config(menu=menu)
-
+        #~ def donothing(self): pass  # TODO:remove
         #~ filemenu = Menu(menu)
         #~ filemenu.add_command(label='New...', command=donothing)
         #~ filemenu.add_command(label='Open...', command=donothing)
@@ -80,69 +181,49 @@ class MainWindow(object):
         #~ editmenu = Menu(menu)
         #~ editmenu.add_command(label='Copy', command=donothing)
 
-        #~ menu.add_cascade(label='File', menu=filemenu)
+        #~ menu.add_cascade(label='File', menu=filemenu, accelerator='Alt-f')
         #~ menu.add_cascade(label='Edit', menu=editmenu)
 
-        # --- Toolbar ---
-        toolbar = LabelFrame(root, text='Local servald')
-        toolbar.pack(side='bottom', fill='x', padx=5, pady=5)
+        # --- Servald ---
+        
+        control_frame = LabelFrame(root, text='Local servald')
+        control_frame.grid(row=10, sticky='we', padx=5)#, pady=5)
 
-        start_servald_btn = Button(toolbar, text='Start servald', command=self.cmd_start_servald)
-        start_servald_btn.pack(side='left', padx=5)
-        stop_servald_btn = Button(toolbar, text='Stop', command=self.cmd_stop_servald)
-        stop_servald_btn.pack(side='left', padx=5)
-        self.servalcmd = StringVar()
-        entry = Entry(toolbar, textvariable=self.servalcmd, width=40)
-        entry.pack(side='left', fill='x')
-        btn = Button(toolbar, text='Run', command=self.cmd_run_servalcmd)
-        btn.pack(side='left')
-        btn = Button(toolbar, text='Quit', command=self.cmd_quit)
-        btn.pack(side='right', padx=5)
-        entry.bind('<Return>', self.cmd_run_servalcmd)
+        # --- Main Content ---
 
+        #Style().configure('TFrame', background='black', foreground='green')
+        mainframe = Frame(root)
+        mainframe.grid(row=20)
+        btn = Button(mainframe, text='List Bundles', command=self.cmd_ZZdujour)
+        btn.grid(row=0, column=5)
+        btn = Button(mainframe, text='Quit', command=self.cmd_quit)
+        btn.grid(row=0, column=6)
 
-        for child in toolbar.winfo_children():
-            child.pack_configure(padx=5, pady=5)
-        entry.focus()
+        self.output_w = Text(mainframe, width=120, height=20)
+        self.output_w.insert('1.0', 'Output will appear here.')
+        self.output_w.grid(row=1, column=0, columnspan=7)
 
         # --- Statusbar ---
 
         self.status = StringVar()
         status = Label(root, textvariable=self.status, text='Processing...',
                        relief=SUNKEN, anchor=W)
-        status.pack(side='bottom', fill=X)
+        status.grid(row=30, sticky='wse')
 
-        # --- Main Content ---
-        #Style().configure('TFrame', background='black', foreground='green')
-        mainframe = Frame(root)
-        mainframe.pack(fill=Y)
-        btn = Button(mainframe, text='Cmd du jour', command=self.cmd_ZZdujour)
-        btn.pack(side='top', padx=5)
+        grip = Sizegrip(status)
+        grip.pack(side='right')
 
-        self.output = Text(mainframe)#, width=120, height=20)
-        self.output.insert('1.0', 'Output will appear here.')
-        self.output.pack(fill=BOTH)
+        root.columnconfigure(0, weight=1)
+        root.rowconfigure(20, weight=1)
         
-        #Style().configure('TLabel', background='red', foreground='white')
-
-        #root.bind('<Return>', self.cmd_ZZdujour)
-
+        # --- Sub-windows ---
+        self.daemon_controller = DaemonController(control_frame, self)
 
     def cmd_quit(self, *ign):
         logd('cmd_quit called')
         self.root.quit()
 
-    def cmd_start_servald(self):
-        self.servald.start()
         
-    def cmd_stop_servald(self):
-        self.servald.stop_running_daemon()
-
-    def cmd_run_servalcmd(self, *ign):
-        cmd = self.servalcmd.get().split()
-        res, out = self.servald.exec_cmd_withoutput(cmd)
-        out = out.decode('utf8')
-        text_replace(self.output, 'Exit code:{}\n{}'.format(res, out))
 
 
 # Functions ----------------------------------------------------------
@@ -152,7 +233,7 @@ def logd(*args):
     _logger.debug(args)
 
 
-def main():
+def main(argv):
     logging.basicConfig(
                     format='%(asctime)s:%(name)s:%(levelname)s:%(message)s',
                     datefmt = '%H:%M:%S',
@@ -163,4 +244,5 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    import sys
+    main(sys.argv)
