@@ -33,23 +33,19 @@ _logger = logging.getLogger(__name__)
 
 try:
     from tkinter import *
-    from tkinter.font import *
     from tkinter.ttk import *
-    from tkinter import messagebox as tkMessageBox
 except ImportError:
     from Tkinter import *
-    from tkFont import *
     from ttk import *
-    import tkMessageBox
+import select
+import socket
 import meshy
 
-def text_replace(widget, text):
-    widget.delete('1.0', 'end')
-    widget.insert('1.0', text)
 
 
 class DaemonController(object):
     def __init__(self, parent, main_obj):
+        self.parent = parent
         self.main = main_obj
 
         # --- Styles ---
@@ -101,6 +97,7 @@ class DaemonController(object):
         entry.focus()
 
         self.indicator['style'] = 'broken.ServaldFrame.TLabelframe'
+        self.monitor_socket = None
         try:
             self.servald = meshy.Servald(
                                     instancepath=DEFAULT_INSTANCEPATH)
@@ -109,6 +106,7 @@ class DaemonController(object):
             res, out = self.servald.exec_cmd(['status'])
             if res == 0:
                 self.indicator['style'] = 'running.ServaldFrame.TLabelframe'
+                self._init_monitor_socket(self.servald)
         except meshy.ServalError:
             self.main.output('Unable to initialise serval. Please check the '
                 'serval logs for details')
@@ -128,31 +126,70 @@ class DaemonController(object):
 
     def cmd_stop_servald(self, *ignore):
         res, out = self.servald.stop_running_daemon()
+        if self.monitor_socket:
+            self.monitor_socket.close()
+        self.monitor_socket = None
         if res == 0:
             self.indicator['style'] = 'ServaldFrame.TLabelframe'
         else:
             self.indicator['style'] = 'broken.ServaldFrame.TLabelframe'
             self.main.output('Exit code:{}\n{}'.format(res, out))
-            
 
     def cmd_start_servald(self, *ignore):
         try:
             self.servald.start()
             self.indicator['style'] = 'running.ServaldFrame.TLabelframe'
+            self._init_monitor_socket(self.servald)
         except meshy.ServalError:
             self.indicator['style'] = 'broken.ServaldFrame.TLabelframe'
+
+    def _init_monitor_socket(self, servald):
+        self.monitor_socket = socket.socket(
+                                    socket.AF_UNIX, socket.SOCK_STREAM)
+        self.monitor_socket.connect('\x00' +
+                                servald.instancepath[1:] + '/monitor.socket')
+        # Schedule a poll
+        self.parent.after(100, self.poll_monitor_socket)
+
+    def poll_monitor_socket(self):
+        '''Scheduled function. Checks if the monitor_socket is still
+        connected and updates the visual status of the daemon if it is not.
+        '''
+        if self.monitor_socket is None:
+            return
+        r,w,x = select.select([self.monitor_socket], [],
+                    [self.monitor_socket], 0)  # 0 to return immediately
+        resched = True
+        if x:  # Exception
+            logd('Exception on monitor socket')
+            self.monitor_socket.close()
+            resched = False
+        if r:  # readable
+            data = self.monitor_socket.recv(512)
+            if data:
+                # ignore incoming data
+                pass
+            else:  # End of File. Remote closed
+                self.monitor_socket.close()
+                resched = False
+        if resched:
+            # Re-schedule ourselves
+            self.parent.after(100, self.poll_monitor_socket)
+        else:
+            self.indicator['style'] = 'broken.ServaldFrame.TLabelframe'
+
 
 
 class MainWindow(object):
 
     def output(self, textdata):
         text_replace(self.output_w, textdata)
-        
+
     def cmd_ZZdujour(self, *args):
         rhizome = self.daemon_controller.servald.get_rhizome()
         #TODO:Get unicode output from meshy
         self.output(repr(rhizome.bundles).decode('utf8'))
-        
+
     def __init__(self, root):
         # --- Tk init ---
         self.root = root
@@ -185,7 +222,7 @@ class MainWindow(object):
         #~ menu.add_cascade(label='Edit', menu=editmenu)
 
         # --- Servald ---
-        
+
         control_frame = LabelFrame(root, text='Local servald')
         control_frame.grid(row=10, sticky='we', padx=5)#, pady=5)
 
@@ -215,7 +252,7 @@ class MainWindow(object):
 
         root.columnconfigure(0, weight=1)
         root.rowconfigure(20, weight=1)
-        
+
         # --- Sub-windows ---
         self.daemon_controller = DaemonController(control_frame, self)
 
@@ -223,14 +260,17 @@ class MainWindow(object):
         logd('cmd_quit called')
         self.root.quit()
 
-        
+
 
 
 # Functions ----------------------------------------------------------
 #
-def logd(*args):
-    '''log args at level `Debug`'''
-    _logger.debug(args)
+logd = _logger.debug
+
+
+def text_replace(widget, text):
+    widget.delete('1.0', 'end')
+    widget.insert('1.0', text)
 
 
 def main(argv):
