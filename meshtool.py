@@ -227,28 +227,21 @@ class MainWindow(object):
         # --- Servald ---
 
         control_frame = LabelFrame(root, text='Local servald')
-        control_frame.grid(row=10, sticky='we', padx=5)#, pady=5)
+        control_frame.grid(row=10, column=0, sticky='we', padx=5)#, pady=5)
 
         # --- Main Content ---
 
         #Style().configure('TFrame', background='black', foreground='green')
         mainframe = Frame(root)
-        mainframe.grid(row=20)
-        btn = Button(mainframe, text='List Bundles', command=self.cmd_ZZdujour)
-        btn.grid(row=0, column=5)
-        btn = Button(mainframe, text='Quit', command=self.cmd_quit)
-        btn.grid(row=0, column=6)
-
-        self.output_w = Text(mainframe, width=120, height=20)
-        self.output_w.insert('1.0', 'Output will appear here.')
-        self.output_w.grid(row=1, column=0, columnspan=7)
-
+        mainframe.grid(row=20, column=0, sticky='nsew')
+        self._init_mainframe(mainframe)
+        
         # --- Statusbar ---
 
         self.status = StringVar()
         status = Label(root, textvariable=self.status, text='Processing...',
                        relief=SUNKEN, anchor=W)
-        status.grid(row=30, sticky='wse')
+        status.grid(row=30, column=0, sticky='wse')
 
         grip = Sizegrip(status)
         grip.pack(side='right')
@@ -258,6 +251,19 @@ class MainWindow(object):
 
         # --- Sub-windows ---
         self.daemon_controller = DaemonController(control_frame, self)
+
+    def _init_mainframe(self, parent):
+        btn = Button(parent, text='List Bundles', command=self.cmd_ZZdujour)
+        btn.grid(row=0, column=5)
+        btn = Button(parent, text='Quit', command=self.cmd_quit)
+        btn.grid(row=0, column=6)
+
+        self.output_w = Text(parent)
+        self.output_w.grid(row=1, column=0, columnspan=7, sticky=NSEW)
+        self.output_w.insert('1.0', 'Output will appear here.')
+
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(1, weight=1)
 
     def cmd_quit(self, *ign):
         logd('cmd_quit called')
