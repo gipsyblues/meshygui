@@ -93,7 +93,10 @@ class DaemonController(object):
         btn.grid(row=0, column=2)
 
         #entry.bind('<Return>', self.cmd_run_servalcmd)
+        # Pressing Enter in the Entry should run the command
         entry.bind('<Return>', lambda e: btn.invoke())
+        # Pressing Enter on the Run button should run the command
+        btn.bind('<Return>', lambda e: btn.invoke())
         entry.focus()
 
         self.indicator['style'] = 'broken.ServaldFrame.TLabelframe'
