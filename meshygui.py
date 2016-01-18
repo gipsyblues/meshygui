@@ -46,8 +46,8 @@ import meshy
 
 class MainWindow(object):
 
-    def output(self, textdata):
-        text_replace(self.output_w, textdata)
+    def output(self, text):
+        self.output_tab_obj.replace_text(text)
 
     def cmd_ZZdujour(self, *args):
         servald = self.daemon_controller.servald
@@ -86,29 +86,41 @@ class MainWindow(object):
         #~ menu.add_cascade(label='File', menu=filemenu, underline=0)
         #~ menu.add_cascade(label='Edit', menu=editmenu, underline=0)
 
-        # --- Servald ---
+        # --- Current Identity bar ---
 
-        control_frame = ttk.LabelFrame(root, text=' Local servald ')
-        control_frame.grid(row=10, column=0, sticky=tk.EW, padx=5,
-                           columnspan=2)
-
+        idframe = ttk.Frame(root)
+        idframe.grid(row=10, column=0, columnspan=2, sticky='new')
+        btn = ttk.Button(idframe, text='Quit', command=self.cmd_quit, underline=0)
+        btn.grid(row=0, column=0)
+        lbl = ttk.Label(idframe, text='Current Identity:', anchor='e')
+        lbl.grid(row=0, column=1)
+        self.current_sid = ttk.Label(idframe, anchor='w')
+        lbl.grid(row=0, column=2)
+        
+        
         # --- Main Content ---
 
         #Style().configure('TFrame', background='black', foreground='green')
-        mainframe = ttk.Frame(root)
+        mainframe = ttk.Frame(root)#, borderwidth=10, relief='ridge')
         mainframe.grid(row=20, column=0, columnspan=2, sticky='nsew')
         self._init_mainframe(mainframe)
         
+        # --- Daemon control ---
+
+        control_frame = ttk.LabelFrame(root, text=' Local servald ')
+        control_frame.grid(row=30, column=0, sticky=tk.EW, padx=5,
+                           columnspan=2)
+
         # --- Statusbar ---
 
         self.status = tk.StringVar()
         #self.status.set('Processing...')
         status = ttk.Label(root, textvariable=self.status, 
                        relief=tk.SUNKEN, anchor=tk.W)
-        status.grid(row=30, column=0, sticky='wse')
+        status.grid(row=40, column=0, sticky='wse')
 
         grip = ttk.Sizegrip(root)
-        grip.grid(row=30, column=1, sticky=tk.SE)
+        grip.grid(row=40, column=1, sticky=tk.SE)
 
         root.columnconfigure(0, weight=1)
         root.rowconfigure(20, weight=1)
@@ -117,43 +129,24 @@ class MainWindow(object):
         self.daemon_controller = DaemonController(control_frame, self)
 
     def _init_mainframe(self, parent):
-        btn = ttk.Button(parent, text='rem peer', command=lambda :self.daemon_controller.register_lost_peer('abcd'))
-        btn.grid(row=0, column=3)
-        btn = ttk.Button(parent, text='add peer', command=lambda :self.daemon_controller.register_new_peer('abcd'))
-        btn.grid(row=0, column=4)
-        btn = ttk.Button(parent, text='List Keyring', command=self.cmd_ZZdujour)
-        btn.grid(row=0, column=5)
-        btn = ttk.Button(parent, text='Quit', command=self.cmd_quit, underline=0)
-        btn.grid(row=0, column=6)
-
-        treeframe = ttk.Frame(parent)#, borderwidth=10, relief='ridge')
-        treeframe.grid(row=1, column=0, columnspan=2, sticky=tk.NSEW)
-        self._init_treeview(treeframe)
+        pw = ttk.PanedWindow(parent, orient=tk.HORIZONTAL)
+        pw.pack(fill=tk.BOTH)
+        pw.grid(row=0, column=0, sticky=tk.NSEW)
         
-        self.output_w = tk.Text(parent)
-        #logd(self.output_w.configure())
-        self.output_w.grid(row=1, column=2, columnspan=5, sticky=tk.NSEW)
-        self.output_w.insert('1.0', 'Output will appear here.')
-
-        parent.columnconfigure(0, weight=1)
-        parent.rowconfigure(1, weight=1)
-        btn.columnconfigure(0, weight=1)
-        btn.rowconfigure(1, weight=1)
-
-    def _init_treeview(self, parent):
-        self.ttree = ttk.Treeview(parent, height=30)
-        self.ttree.grid(row=0, column=0, sticky=tk.NS)
-        id1 = self.ttree.insert('', 0, 'peers', text='Network Peers', open=True)
-        id2 = self.ttree.insert('', 1, 'ab', text='Latest Subscriptions', open=True)
-        self.ttree.insert(id1, 'end', text='First Sub')
-        self.ttree.insert(id2, 'end', text='Different Sub')
-
-        s = ttk.Scrollbar(parent, orient=tk.VERTICAL)#, command=listbox.yview)
-        s.grid(row=0, column=1, sticky=tk.NS, rowspan=2)
-        #listbox.configure(yscrollcommand=s.set)
-
-        parent.columnconfigure(0, weight=1)
+        treepane = ttk.Frame(pw)#, borderwidth=10, relief='ridge')
+        pw.add(treepane, weight=1)
+        self.tree_obj = TreeManager(treepane, self)
         
+        mainpane = ttk.Frame(pw)#, borderwidth=10, relief='ridge')
+        pw.add(mainpane, weight=4)
+
+        self.tabs_w = ttk.Notebook(mainpane)
+        self.tabs_w.pack()
+        
+        self.peer_tab_obj = PeerTab(self.tabs_w, self)
+        self.output_tab_obj = OutputTab(self.tabs_w, self)
+        self.output_tab_obj.show()
+
     def cmd_quit(self, *ign):
         logd('cmd_quit called')
         self.root.quit()
@@ -208,13 +201,21 @@ class DaemonController(object):
         runbtn = ttk.Button(cmd_frame, text='Run', default=tk.ACTIVE, command=self.cmd_run_servalcmd)
         runbtn.grid(row=0, column=2)
 
-        # --- Row 2 ----
-        btn = ttk.Button(toolbar, text='Self + Peers', command=self.cmd_show_peers)
-        btn.grid(row=1, column=0)
-        btn = ttk.Button(toolbar, text='Send Msg', command=self.cmd_send_message)
-        btn.grid(row=1, column=1)
-        btn = ttk.Button(toolbar, text='Show Msgs', command=self.cmd_show_messages)
-        btn.grid(row=1, column=2)
+
+        # TEMP
+        btn = ttk.Button(toolbar, text='rem peer', command=lambda :self.unregister_peer('abcd'))
+        btn.grid(row=1, column=4)
+        btn = ttk.Button(toolbar, text='add peer', command=lambda :self.register_peer('abcd'))
+        btn.grid(row=1, column=3)
+        #~ btn = ttk.Button(toolbar, text='List Keyring', command=self.cmd_ZZdujour)
+        #~ btn.grid(row=0, column=5)
+        #~ # --- Row 2 ----
+        #~ btn = ttk.Button(toolbar, text='Self + Peers', command=self.cmd_show_peers)
+        #~ btn.grid(row=1, column=0)
+        #~ btn = ttk.Button(toolbar, text='Send Msg', command=self.cmd_send_message)
+        #~ btn.grid(row=1, column=1)
+        #~ btn = ttk.Button(toolbar, text='Show Msgs', command=self.cmd_show_messages)
+        #~ btn.grid(row=1, column=2)
         
         toolbar.columnconfigure(3, weight=1)
 
@@ -283,19 +284,19 @@ class DaemonController(object):
 
     """
 
-    def cmd_show_peers(self, *ign):
-        cmd = 'id self'
-        res, out = self.servald.exec_cmd(cmd.split())
-        #TODO:Get unicode output from meshy
-        out = out.decode('utf8')
-        self.main_obj.output('Exit code:{}\n{}'.format(res, out))
-        cmd = 'id peers'
-        res, out = self.servald.exec_cmd(cmd.split())
-        #TODO:Get unicode output from meshy
-        out = out.decode('utf8')
-        self.main_obj.output_w.insert('end', str(
-                'Exit code:{}\n{}'.format(res, out)
-                ).encode('utf8'))
+    #~ def cmd_show_peers(self, *ign):
+        #~ cmd = 'id self'
+        #~ res, out = self.servald.exec_cmd(cmd.split())
+        #~ #TODO:Get unicode output from meshy
+        #~ out = out.decode('utf8')
+        #~ self.main_obj.output('Exit code:{}\n{}'.format(res, out))
+        #~ cmd = 'id peers'
+        #~ res, out = self.servald.exec_cmd(cmd.split())
+        #~ #TODO:Get unicode output from meshy
+        #~ out = out.decode('utf8')
+        #~ self.main_obj.output_w.insert('end', str(
+                #~ 'Exit code:{}\n{}'.format(res, out)
+                #~ ).encode('utf8'))
 
     def cmd_send_message(self, *ign):
         data = self.servalcmd.get().strip()
@@ -380,19 +381,14 @@ class DaemonController(object):
         else:
             self.indicator['style'] = 'broken.ServaldFrame.TLabelframe'
 
-    def register_lost_peer(self, sid):
-        logd('Peer disappeared:%r', sid)
-        self.main_obj.ttree.item('peers.%s' % sid, text='...%s*' % sid[:10])
-        
-    def register_new_peer(self, sid):
+    def register_peer(self, sid):
         logd('New Peer:%r', sid)
-        try:
-            self.main_obj.ttree.insert('peers', 'end', 'peers.%s' % sid, text=sid[:10]+'*')
-        except tk.TclError:
-            self.main_obj.ttree.item('peers.%s' % sid, text=sid[:10]+'*')
-        #self.main_obj.ttree.item(sid)['tags'] = 'disabled'
-        logd('item %r', self.main_obj.ttree.item('peers.%s' % sid))
+        self.main_obj.tree_obj.register_peer(sid)
         
+    def unregister_peer(self, sid):
+        logd('Peer disappeared:%r', sid)
+        self.main_obj.tree_obj.unregister_peer(sid)
+
     def _process_monitor_announcement(self, buf):
         '''Parse and process output from a servald monitor.
         buf must be bytes'''
@@ -411,21 +407,119 @@ class DaemonController(object):
             elif line.startswith(b'LINK:'):
                 logd('Monitor:LINK:%r', line)
             elif line.startswith(b'NEWPEER:'):
-                self.register_new_peer(line[8:].decode('utf8'))
+                self.register_peer(line[8:].decode('utf8'))
             elif line.startswith(b'OLDPEER:'):
-                self.register_lost_peer(line[8:].decode('utf8'))
+                self.unregister_peer(line[8:].decode('utf8'))
             else:
                 logd('Monitor received:%r', line)
 
 
+
+class OutputTab(object):
+    '''Draws and controls the Output tab'''
+    def __init__(self, parent_notebook, main_obj):
+        self.main_obj = main_obj
+        self.parent_notebook = parent_notebook
+        self.frame = ttk.Frame(parent_notebook)
+        self.frame.pack(fill=tk.BOTH)
+        parent_notebook.add(self.frame, text='Output')
+
+        self.output_w = tk.Text(self.frame)
+        self.output_w.grid(row=0, column=0, sticky=tk.NSEW)
+        self.output_w.insert('1.0', 'Output will appear here.')
+
+    def append_text(self, text):
+        '''Append text to the contents of the output window'''
+        self.output_w.insert('end', text)
+        self.show()
+        
+    def replace_text(self, text):
+        '''Replace the contents of the output window with supplied text'''
+        self.output_w.delete('1.0', 'end')
+        self.output_w.insert('1.0', text)
+        self.show()
+        
+    def show(self):
+        '''Show our tab'''
+        self.parent_notebook.select(self.frame)
+
+
+
+class PeerTab(object):
+    '''Draws and controls the Peer tab'''
+    def __init__(self, parent_notebook, main_obj):
+        self.main_obj = main_obj
+        self.parent_notebook = parent_notebook
+        self.sid = None
+        
+        self.frame = ttk.Frame(parent_notebook)
+        self.frame.pack(fill=tk.BOTH)
+        parent_notebook.add(self.frame, text='Peer')
+        self.label = ttk.Label(self.frame, text='None')
+        self.label.grid(row=1, column=0)
+
+    def show(self):
+        '''Show our tab'''
+        self.parent_notebook.select(self.frame)
+
+    def switch_to_sid(self, sid):
+        '''Display information for supplied sid'''
+        logd('switch_to_sid:%r', sid)
+        self.sid = sid
+        self.label['text'] = sid
+        self.show()
+
+
+
+class TreeManager(object):
+    '''Manages the TreeView'''
+    # Naming items in treeview like peers.<SID>
+    def __init__(self, parent, main_obj):
+        self.main_obj = main_obj
+        self.tree_w = ttk.Treeview(parent, columns=('sid'))#, height=30
+        self.tree_w.grid(row=0, column=0, sticky=tk.NSEW)
+        s = ttk.Scrollbar(parent, orient=tk.VERTICAL)#, command=listbox.yview)
+        s.grid(row=0, column=1, sticky=tk.NS)
+        #listbox.configure(yscrollcommand=s.set)
+
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(0, weight=1)
+        
+        id1 = self.tree_w.insert('', 0, 'peers', text='Network Peers', open=True)
+        #id2 = self.tree_w.insert('', 1, 'ab', text='Latest Subscriptions', open=True)
+        #self.tree_w.insert(id1, 'end', text='First Sub')
+
+        self.tree_w.bind('<<TreeviewSelect>>', self.cmd_select)
+
+    def cmd_select(self, event):
+        '''Figures out which item was clicked and invokes relevant
+        functionality.'''
+        itemid = self.tree_w.focus()
+        logd('itemclicked %r', itemid)
+        if itemid.startswith('peers.'):
+            sid = itemid[6:]
+            self.main_obj.peer_tab_obj.switch_to_sid(sid)
+
+    def register_peer(self, sid):
+        '''Show a new peer in the treeview'''
+        try:
+            self.tree_w.insert('peers', 'end', 'peers.%s' % sid,
+                               text=sid[:10]+'*', values=(sid))
+        except tk.TclError:
+            self.tree_w.item('peers.%s' % sid, text=sid[:10]+'*')
+        #self.main_obj.ttree.item(sid)['tags'] = 'disabled'
+        logd('item %r', self.tree_w.item('peers.%s' % sid))
+
+    def unregister_peer(self, sid):
+        '''Show peer as no longer around'''
+        self.tree_w.item('peers.%s' % sid, text='...%s*' % sid[:10])
+        logd('item %r', self.tree_w.item('peers.%s' % sid))
+
+
+    
 # Functions ----------------------------------------------------------
 #
 logd = _logger.debug
-
-
-def text_replace(widget, text):
-    widget.delete('1.0', 'end')
-    widget.insert('1.0', str(text).encode('utf8'))
 
 
 def main(argv):
@@ -441,3 +535,8 @@ def main(argv):
 if __name__ == '__main__':
     import sys
     main(sys.argv)
+
+# Useful snippets:
+# , borderwidth=10, relief='ridge'
+# .pack(fill=tk.BOTH)
+# logd('configure:%s', .configure())
