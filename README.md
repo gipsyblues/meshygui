@@ -11,7 +11,8 @@ receive MeshMS messages, start and stop the serval daemon and easily run
 serval commands.
 
 The software is written using the Python programming language and uses the
-Tk graphical toolkit and so should run on any system which has Python.
+Tk graphical toolkit and so should run on any system which has Python 2.7
+or Python 3.4.
 
 All advice and assitance to improve the software will be gratefully received,
 as will code reviews, bug reports, patches and any other contributions.
@@ -45,9 +46,9 @@ Install/Run
 3. Run `./meshygui`
 
 For the serval instance path, it will use the following :
-    + The first command-line argument
-    + The environment variable `SERVALINSTANCE_PATH`
-    + ~/meshy/serval
+    - The first command-line argument
+    - The environment variable `SERVALINSTANCE_PATH`
+    - `~/meshy/serval`
 
 
 Contact
@@ -63,7 +64,7 @@ mailing list, so I should see any messages posted there, or email me at
 License
 --------
 
-Copyright 2015-2016 Kevin Steen <ks@kevinsteen.net>
+Copyright 2015-2016 Kevin Steen
 
 Unless otherwise indicated, all source code is Free Software. You can
 redistribute it and/or modify it under the terms of the GNU Affero
