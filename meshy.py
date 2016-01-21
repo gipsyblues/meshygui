@@ -362,11 +362,17 @@ class SID(object):
             self.hexsid = mapping['sid']
             self.DID = mapping.get('did')
             self.name = mapping.get('name')
+        self.shorthex = '{}*'.format(self.hexsid[:10])
 
     def __repr__(self):
-        return ('SID(%r, DID=%r, name=%r)' % (
-                self.hexsid, self.DID, self.name))
+        return 'SID(%r, DID=%r, name=%r)' % (
+               self.hexsid, self.DID, self.name)
 
+    def __str__(self):
+        if self.DID:
+            return '{0.name} ({0.DID}) sid:{0.shorthex}'.format(self).strip()
+        else:
+            return self.hexsid
 
 
 class Keyring(object):
@@ -401,9 +407,12 @@ class Keyring(object):
         '''Lock this keyring (forget the password)'''
         raise NotImplementedError
 
-    def __getitem__(self, key):
-        return self._SIDlist[key]
-        
+    def __getitem__(self, index):
+        return self._SIDlist[index]
+
+    def __iter__(self):
+        return iter(self._SIDlist)
+
     def __repr__(self):
         return '\n'.join(repr(s) for s in self._SIDlist)
 
@@ -445,15 +454,19 @@ class REST_API(object):
         request.add_header('Authorization', b'Basic ' + \
             base64.b64encode(val))
 
-        logd('REST_API.GET_json_list: url:%s', fullurl)
+        #logd('REST_API.GET_json_list: url:%s', fullurl)
         response = urlopen(request, timeout=self.timeout)
-        logd('GET_json_list: response:{}, getcode():{}, info():{}'
-             .format(response, response.getcode(), response.info()))
+        #logd('GET_json_list: response:{}, getcode():{}, info():{}'
+        #     .format(response, response.getcode(), response.info()))
         reader = codecs.getreader('utf8')
-        result = reader(response)
-        return _decode_rhizome_json_list(stream=result)
+        stream = reader(response)
+        try:
+            line = next(stream)  # skip first line '{\n'
+        except StopIteration:
+            raise ValueError('Empty JSON list')
+        return _decode_json_list(stream=stream)
 
-    def GET_keyring_add(self, path, pin=None):
+    def keyring_add(self, path, pin=None):
         '''Make a request to the Serval REST keyring add API expecting a
         JSON result. Return a dict with a 'sid' key and value.
         '''
@@ -475,6 +488,78 @@ class REST_API(object):
         result = reader(response)
         res = json.loads(result.read())
         return res['identity']
+
+    def fetch_meshms_conversationlist(self, my_sid):
+        """Generator which yields dictionaries describing ???
+        """
+        """
+        {
+        "header":["_id","my_sid","their_sid","read","last_message","read_offset"],
+        "rows":[
+        [0,"6DEEF513773A953FD9BAE28B30F854D90F3BF289644CD750F987C34E291D055A","B47FC3265250B31D86849AC1B2E4AF0D419604A30BD02223D491060619BB1014",false,70,0],
+        [1,"6DEEF513773A953FD9BAE28B30F854D90F3BF289644CD750F987C34E291D055A","33FE98B9ED39A0C87F37583E72ED51140A65AD68C0D12B4D90F118476202E657",false,359,0],
+        [2,"6DEEF513773A953FD9BAE28B30F854D90F3BF289644CD750F987C34E291D055A","B1CD48A9CA9EFC7F42C342E334856067DF131825D764E01D7E099F1961D5E372",true,0,0]
+        ]
+        }
+        """
+        path = 'meshms/{}/conversationlist.json'.format(my_sid)
+        fullurl = self._baseurl + path
+        request = Request(fullurl)
+        val = bytearray(self._user + ':' + self._password, 'utf8')
+        request.add_header('Authorization', b'Basic ' + \
+            base64.b64encode(val))
+
+        #TODO: Catch & report HTTP errors
+        response = urlopen(request, timeout=self.timeout)
+        #logd('fetch_meshms_conversationlist: response:{}, getcode():{}, info():{}'
+        #     .format(response, response.getcode(), response.info()))
+        reader = codecs.getreader('utf8')
+        stream = reader(response)
+        try:
+            line = next(stream)  # skip first line '{\n'
+        except StopIteration:
+            raise ValueError('Empty JSON list')
+        return _decode_json_list(stream=stream)
+
+
+    def fetch_meshms_messagelist(self, my_sid, their_sid):
+        """Generator which yields dictionaries describing each message
+        send between mysid and theirsid.
+        """
+        """
+        {
+        "read_offset":0,
+        "latest_ack_offset":359,
+        "header":["type","my_sid","their_sid","offset","token","text","delivered","read","timestamp","ack_offset"],
+        "rows":[
+        [">","6DEEF513773A953FD9BAE28B30F854D90F3BF289644CD750F987C34E291D055A","33FE98B9ED39A0C87F37583E72ED51140A65AD68C0D12B4D90F118476202E657",359,"75URvvotcxO38IKs078KaRc1iLbA-ee6YGkgEaZ167FnAQAAAAAAAA==","reboot",true,false,1453164547,null],
+        ["<","6DEEF513773A953FD9BAE28B30F854D90F3BF289644CD750F987C34E291D055A","33FE98B9ED39A0C87F37583E72ED51140A65AD68C0D12B4D90F118476202E657",359,"VXe25OneON9Cuv6q10XFnItq4O0XwXsD9gUiv6nykIVnAQAAAAAAAA==","aaa",true,false,1453164345,null],
+        ["ACK","6DEEF513773A953FD9BAE28B30F854D90F3BF289644CD750F987C34E291D055A","33FE98B9ED39A0C87F37583E72ED51140A65AD68C0D12B4D90F118476202E657",370,"VXe25OneON9Cuv6q10XFnItq4O0XwXsD9gUiv6nykIVbAQAAAAAAAA==",null,true,false,null,359],
+        [">","6DEEF513773A953FD9BAE28B30F854D90F3BF289644CD750F987C34E291D055A","33FE98B9ED39A0C87F37583E72ED51140A65AD68C0D12B4D90F118476202E657",14,"75URvvotcxO38IKs078KaRc1iLbA-ee6YGkgEaZ167EOAAAAAAAAAA==","hiya franny",true,false,1452794995,null]
+        ]
+        }
+        """
+        path = 'meshms/{}/{}/messagelist.json'.format(
+                    my_sid, their_sid)
+        fullurl = self._baseurl + path
+        request = Request(fullurl)
+        val = bytearray(self._user + ':' + self._password, 'utf8')
+        request.add_header('Authorization', b'Basic ' + \
+            base64.b64encode(val))
+
+        #TODO: Catch & report HTTP errors
+        response = urlopen(request, timeout=self.timeout)
+        #logd('fetch_meshms_messagelist: response:{}, getcode():{}, info():{}'
+        #     .format(response, response.getcode(), response.info()))
+        reader = codecs.getreader('utf8')
+        stream = reader(response)
+        try:
+            line = next(stream)  # skip first line '{\n'
+            line = next(stream)  # skip '"read_offset":0,'
+            line = next(stream)  # skip '"latest_ack_offset":359,'
+        except StopIteration:
+            raise ValueError('Empty JSON list')
+        return _decode_json_list(stream=stream)
 
     def post_bundle(self, path, params):
         '''Send a POST request to the REST API. Returns the Response object'''
@@ -745,8 +830,9 @@ class Servald(object):
             params = {'pin': pin}
         else:
             params = None
+        api = REST_API(auth=self.auth, port=self._RESTport)
         return Keyring(
-            api=self._api,
+            api=api,
             RESTSIDlist=self._api.GET_json_list('keyring/identities.json',
                                                 params)
             )
@@ -760,6 +846,13 @@ class Servald(object):
         monitor_socket.connect('\x00' +
                                self.instancepath[1:] + '/monitor.socket')
         return monitor_socket
+
+    def fetch_meshms_messagelist(self, my_sid, their_sid):
+        if self.auth is None:
+            self.auth = self.get_REST_default_credentials()
+        api = REST_API(auth=self.auth, port=self._RESTport)
+        return api.fetch_meshms_messagelist(my_sid=my_sid,
+                                            their_sid=their_sid)
 
     def get_REST_default_credentials(self):
         '''Returns the default credentials to access the REST API. This will
@@ -877,16 +970,15 @@ logw = _logger.warning
 loge = _logger.error
 
 
-def _decode_rhizome_json_list(stream):
+def _decode_json_list(stream):
     '''Generator which yields dict objects decoded from the supplied
     unicode stream in Serval's REST response format. Closes the stream when
     finished.
     '''
     try:
-        line = next(stream)  # skip first line '{\n'
         line = next(stream)
     except StopIteration:
-        raise ValueError('Empty Rhizome JSON list')
+        raise ValueError('Empty JSON list')
     decoded = json.loads('{' + line[:-2] + '}')
     try:
         headers = decoded['header']
@@ -908,7 +1000,7 @@ def _decode_rhizome_json_list(stream):
         record = dict(zip(headers, row))
         yield record
     # If we reach here, it's an error
-    raise ValueError('No Rhizome JSON list found')
+    raise ValueError('No JSON list found')
 
 
 def _formatted_headers(dic):
@@ -1003,4 +1095,6 @@ def start_servald(instancepath=None, binpath=None):
 # Main ---------------------------------------------------------------
 #
 if __name__ == '__main__':
+    print("This is probably not the program you're looking for.")
+    print('Try running `meshygui` instead.')
     print('Use `import meshy` to use this library')
