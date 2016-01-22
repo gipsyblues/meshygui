@@ -843,8 +843,18 @@ class Servald(object):
         # (from monitor.c, monitor_set function)
         # vomp, rhizome, peers, dnahelper, links, quit, interface
         monitor_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        monitor_socket.connect('\x00' +
-                               self.instancepath[1:] + '/monitor.socket')
+        sock_addr = '\x00' + self.instancepath[1:] + '/monitor.socket'
+        logd('Connecting to monitor socket:%r', sock_addr)
+        try:
+            monitor_socket.connect(sock_addr)
+        except socket.error:
+            sock_addr = self.instancepath + '/monitor.socket'
+            logd('Connecting to monitor socket:%r', sock_addr)
+            try:
+                monitor_socket.connect(sock_addr)
+            except socket.error:
+                loge('get_monitor_socket:Unable to connect to monitor socket')
+                raise ServalError('Unable to connect to monitor socket')
         return monitor_socket
 
     def fetch_meshms_messagelist(self, my_sid, their_sid):

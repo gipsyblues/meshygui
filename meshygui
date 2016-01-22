@@ -63,7 +63,7 @@ def main(argv):
     logging.basicConfig(
                     format='%(asctime)s:%(name)s:%(levelname)s:%(message)s',
                     datefmt = '%H:%M:%S',
-                    level=logging.INFO,
+                    level=logging.DEBUG,
                     )
     instancepath = os.environ.get('SERVALINSTANCE_PATH')
     if len(argv) > 1:
@@ -390,12 +390,12 @@ class DaemonController(object):
         logd('Exit code:{}\n{}'.format(res, out))
 
     def _init_from_running_servald(self):
-        self.indicator['style'] = 'running.ServaldFrame.TLabelframe'
         self._init_monitor_socket(self.servald)
         # TODO: Create a method on MainWindow:
         curr_id = self.servald.keyring[0]
         logi('Current Id:%s', curr_id)
         self.main_obj.set_current_id(curr_id)
+        self.indicator['style'] = 'running.ServaldFrame.TLabelframe'
 
     def _init_monitor_socket(self, servald):
         self.monitor_socket = servald.get_monitor_socket()
