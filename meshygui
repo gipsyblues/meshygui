@@ -106,7 +106,7 @@ class MainWindow(object):
         #self.root.createcommand('exit', self.cmd_quit)
 
         self.root.option_add('*tearOff', False)
-        root.bind('<Alt_L><q>', self.cmd_quit)
+        root.bind('<Alt-q>', self.cmd_quit)
         #root.bind('<Return>', self.cmd_ZZdujour)
 
         # --- Menu ---
@@ -681,6 +681,9 @@ class TreeManager(object):
 #
 logd = _logger.debug
 logi = _logger.info
+logw = _logger.warning  # Default log output level
+loge = _logger.error
+logc = _logger.critical
 
 
 if __name__ == '__main__':
