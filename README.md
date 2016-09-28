@@ -14,7 +14,7 @@ The software is written using the Python programming language and uses the
 Tk graphical toolkit and so should run on any system which has Python 2.7
 or Python 3.4.
 
-All advice and assitance to improve the software will be gratefully received,
+All advice and assistance to improve the software will be gratefully received,
 as will code reviews, bug reports, patches and any other contributions.
 
 [Serval mesh network]: http://www.servalproject.org/
