@@ -75,22 +75,15 @@ import logging
 import os
 import socket
 import subprocess
-try:
-    from urllib.request import urlopen, Request
+try:  # Python 3
+    import http.client as http
     from urllib.parse import urlencode
 except ImportError:
-    from urllib2 import urlopen, Request
+    # Python 2
+    import httplib as http
     from urllib import urlencode
 
-
-try:
-    import requests
-except ImportError:
-    print('Unable to find `requests` module. Some features unavailable')
-
 __version_info__ = 0, 1, 0
-
-REST_DEFAULT_PORT = 4110
 
 _logger = logging.getLogger(__name__)
 
@@ -112,11 +105,11 @@ class RhizomeResult(object):
         self.payload_status_code = None
         self.payload_status_message = ''
         prefix = 'serval-rhizome-result-'
-        for key in headers:
-            lkey = key.lower()
+        for header in headers:
+            lkey = header[0].lower()
             if lkey.startswith(prefix):
                 validident = lkey[len(prefix):].replace('-', '_')
-                self.__dict__[validident] = headers[key]
+                self.__dict__[validident] = header[1]
         if self.bundle_status_code:
             self.bundle_status_code = int(self.bundle_status_code)
         if self.payload_status_code:
@@ -271,13 +264,12 @@ class Bundle(PartialBundle):
                                     encoding='utf8')
         return result
 
-    def update_from_headers(self, mapping):
+    def update_from_headers(self, iterable):
         '''Update this bundle from the supplied Rhizome HTTP headers
-        mapping keys should be `str`.
         '''
         prefix = 'serval-rhizome-bundle-'  # Must be lowercase
-        for origkey in mapping:
-            key = origkey.lower()
+        for (key, value) in iterable:
+            key = key.lower()
             if key == prefix + 'name':
                 continue  # Rhizome won't generate a name
             if key == prefix + 'rowid':
@@ -290,7 +282,7 @@ class Bundle(PartialBundle):
                     #~ print('UPDATING %s from <MISSING> TO %s'
                     #~       % (k[22:], h[k]))
                 newkey = key[len(prefix):].lower()
-                self[newkey] = mapping[origkey]
+                self[newkey] = value
 
     def update_from_manifest(self, manifest):
         '''Update this bundle by decoding the text+binarysig manifest'''
@@ -418,53 +410,40 @@ class Keyring(object):
 
 
 class REST_API(object):
-    '''REST_API
-    '''
-    # Warning: The requests.headers are `str`, thus different on Python2/3
     # TODO: Return RhizomeResponse or raise RhizomeError from relevant methods
-    _APIREALM = 'Serval RESTful API'
-    def __init__(self, auth, port=REST_DEFAULT_PORT, timeout=5):
-        self._baseurl = 'http://127.0.0.1:{}/restful/'.format(port)
-        #self._baseurl = 'http://httpbin.org/post'
-        self.port = port
+    BASEPATH = '/restful/'
+    DEFAULT_PORT = 4110
+    def __init__(self, auth, port=None, timeout=None):
+        self.port = port or self.DEFAULT_PORT
         self._user = auth[0]
         self._password = auth[1]
-        self.timeout = timeout
+        self.timeout = timeout or 5
+        val = bytearray(self._user + ':' + self._password, 'latin-1')
+        self._auth_b64 = base64.b64encode(val)
 
-    def GET(self, path, params=None, data=None):
-        url = self._baseurl + path
-        logd('REST_API.GET: url:%s', url)
-        res = requests.get(url=url,
-                           timeout=self.timeout,
-                           data=data,
-                           params=params,
-                           auth=(self._user, self._password),
-                          )
-        return res
+
+    def GET(self, path, params=None):
+        extra = ''
+        if params:
+            extra = '?' + urlencode(params)
+        fullpath = self.BASEPATH + path + extra
+
+        headers = dict(Authorization = b'Basic ' + self._auth_b64)
+
+        conn = http.HTTPConnection('127.0.0.1', self.port, timeout=self.timeout)
+        conn.request('GET', fullpath, headers=headers)#body, headers))
+        resp = conn.getresponse()
+        #~ print('Status:{} {}'.format(resp.status, resp.reason))
+        #~ print('Headers: ', resp.getheaders())
+        return resp
 
     def GET_json_list(self, path, params=None):
-        '''Make a request to the Serval REST API expecting a JSON list
-        result'''
-        data = ''
-        if params:
-            data = '?' + urlencode(params)
-        fullurl = self._baseurl + path + data
-        request = Request(fullurl)
-        val = bytearray(self._user + ':' + self._password, 'utf8')
-        request.add_header('Authorization', b'Basic ' + \
-            base64.b64encode(val))
-
-        #logd('REST_API.GET_json_list: url:%s', fullurl)
-        response = urlopen(request, timeout=self.timeout)
-        #logd('GET_json_list: response:{}, getcode():{}, info():{}'
-        #     .format(response, response.getcode(), response.info()))
+        '''Generator: Make a request to the Serval REST API and decode the
+        returned JSON list into dict() objects.'''
+        response = self.GET(path=path, params=params)
         reader = codecs.getreader('utf8')
-        stream = reader(response)
-        try:
-            line = next(stream)  # skip first line '{\n'
-        except StopIteration:
-            raise ValueError('Empty JSON list')
-        return _decode_json_list(stream=stream)
+        result = reader(response)
+        return _decode_rhizome_json_list(stream=result)
 
     def keyring_add(self, path, pin=None):
         '''Make a request to the Serval REST keyring add API expecting a
@@ -562,15 +541,44 @@ class REST_API(object):
         return _decode_json_list(stream=stream)
 
     def post_bundle(self, path, params):
-        '''Send a POST request to the REST API. Returns the Response object'''
-        url = self._baseurl + path
-        logd('REST_API.POST: url:%s', url)
-        res = requests.post(url=url,
-                            files=params,
-                            timeout=self.timeout,
-                            auth=(self._user, self._password),
-                           )
-        return res
+        '''Send a POST request to the REST API. Returns the Response object
+        params : list of (name, data, mimetype) tuples
+        returns : httplib.HTTPResponse object
+            (status, reason, getheaders(), read())
+        '''
+        fullpath = self.BASEPATH + path
+
+        headers = dict(Authorization = b'Basic ' + self._auth_b64)
+        # TODO: Ensure boundary string not in body
+        headers['Content-Type'] = 'multipart/form-data; boundary=5ae0cd27dbf049998b659580e89cea48'
+
+        body = bytearray()
+        for name, data, mimetype in params:
+            body += bytearray(
+                '--5ae0cd27dbf049998b659580e89cea48\r\n' +
+                'Content-Disposition: form-data; name="' + name + '"\r\n' +
+                'Content-Type: ' + mimetype + '\r\n\r\n'
+                , 'utf8' )
+            if hasattr(data, 'read'):  # File?
+                body.extend(data.read())
+                body.extend(b'\r\n')
+            else:
+                if data:
+                    body += data + b'\r\n'
+                else:  # Empty
+                    body += b'\r\n'
+        body += b'--5ae0cd27dbf049998b659580e89cea48--\r\n'
+
+        conn = http.HTTPConnection('127.0.0.1', self.port, timeout=self.timeout)
+        #conn = http.HTTPConnection('httpbin.org', 80)
+        #conn.set_debuglevel(255)
+        conn.request('POST', fullpath, body=body, headers=headers)
+        #conn.request('POST', '/post', body=body, headers=headers)
+        resp = conn.getresponse()
+        #~ print('Status:{} {}'.format(resp.status, resp.reason))
+        #~ print('Headers: ', resp.getheaders())
+        #~ print('Body: ', resp.read())
+        return resp
 
     def __repr__(self):
         return ('REST_API(auth=(%r, REDACTED), port=%r, timeout=%r)' % (
@@ -598,7 +606,7 @@ class Rhizome(object):
     RESP_200_OK = 200
     RESP_201_CREATED = 201
     RESP_202_ACCEPTED = 202
-    def __init__(self, auth=None, RESTport=REST_DEFAULT_PORT):
+    def __init__(self, auth=None, RESTport=None):
         if auth is None:
             raise RuntimeError(
                 '\n\n'
@@ -647,18 +655,14 @@ class Rhizome(object):
             raise AttributeError('Need to supply a Bundle with an `id` key')
         path = 'rhizome/%s.rhm' % bundle['id']
         res = self._api.GET(path)
-        if res.status_code == Rhizome.RESP_200_OK:
+        if res.status == Rhizome.RESP_200_OK:
             #logd('CONTENT:\n %r', res.content)
             bundle = Bundle(bundle)
-            bundle.update_from_headers(res.headers)
-            bundle.update_from_manifest(res.content)
+            bundle.update_from_headers(res.getheaders())
+            bundle.update_from_manifest(res.read())
             return bundle
         else:
-            print('GET_BUNDLE_MANIFEST FAILED. STATUS:', res.status_code)
-            print('CONTENT:\n', repr(res.content))
-            print('SENT REQUEST HEADERS:', res.request.headers)
-            print('SENT REQUEST BODY:', res.request.body)
-            res.raise_for_status()
+            raise RhizomeError(RhizomeResult(res.status, res.getheaders()))
 
     def get_bundle_payload_raw(self, bundle):
         '''Retrieve the payload from Rhizome and populate bundle.payload.
@@ -668,49 +672,35 @@ class Rhizome(object):
         if 'id' not in bundle:
             raise AttributeError('Need to supply a Bundle with an `id` key')
         path = 'rhizome/%s/raw.bin' % bundle['id']
-        data = {}
+        params = {}
         if 'secret' in bundle:
-            data['secret'] = bundle['secret']
-        res = self._api.GET(path, data=data)
-        if res.status_code == Rhizome.RESP_200_OK:
+            params['secret'] = bundle['secret']
+        res = self._api.GET(path, params=params)
+        if res.status == Rhizome.RESP_200_OK:
             #logd('CONTENT:\n%r', repr(res.content))
-            bundle.payload = res.content
+            bundle.payload = res.read()
             return bundle
         else:
-            print('GET_BUNDLE_PAYLOAD FAILED. STATUS:', res.status_code)
-            print('CONTENT:\n', repr(res.content))
-            print('SENT REQUEST HEADERS:', res.request.headers)
-            print('SENT REQUEST BODY:', res.request.body)
-            res.raise_for_status()
+            raise RhizomeError(RhizomeResult(res.status, res.getheaders()))
 
     def insert_bundle(self, bundle):
         '''insert_bundle(bundle) - Insert a Bundle into the Rhizome store
         bundle is updated with any Rhizome-applied attributes, including
         the Bundle ID (id), Bundle Secret (secret), date, filehash,
         and inserttime
+        Returns a RhizomeResult instance containing the result codes
         '''
         params = _get_post_bundle_params(bundle)
-        #logd('insert_bundle: params:%r', params)
+        #print('insert_bundle: params:%r', params)
         res = self._api.post_bundle(path='rhizome/insert', params=params)
-        rhizome_result = RhizomeResult(http_status_code=res.status_code,
-                                       headers=res.headers)
-        #~ print('Rhizome result:', rhizome_result)
-        #~ print('REQUEST HEADERS:', res.request.headers)
-        #~ print('REQUEST BODY:', res.request.body)
-        #~ print('RESULT HEADERS:\n' + _formatted_headers(res.headers))
-        #~ print('RESULT BODY:\n', repr(res.content))
-        if res.status_code == Rhizome.RESP_200_OK \
-           or res.status_code == Rhizome.RESP_201_CREATED:
-            bundle.update_from_headers(res.headers)
-            bundle.update_from_manifest(res.content)
+        rhizome_result = RhizomeResult(http_status_code=res.status,
+                                       headers=res.getheaders())
+        if res.status == Rhizome.RESP_200_OK \
+           or res.status == Rhizome.RESP_201_CREATED:
+            bundle.update_from_headers(res.getheaders())
+            bundle.update_from_manifest(res.read())
             return rhizome_result
         else:
-            print('INSERT_BUNDLE FAILED. STATUS:', res.status_code)
-            print('Rhizome result:', rhizome_result)
-            print('REQUEST HEADERS:', res.request.headers)
-            print('REQUEST BODY:', res.request.body)
-            print('RESULT HEADERS:\n' + _formatted_headers(res.headers))
-            print('RESULT BODY:\n', repr(res.content))
             raise RhizomeError(rhizome_result)
 
     def _create_bundle(self, dic):
@@ -744,7 +734,6 @@ class Servald(object):
             accessing the REST API.
         RESTport : int (Optional)
             The TCP port number to use to contact the REST API.
-            Defaults to meshy.REST_DEFAULT_PORT
     Attributes:
         keyring  (read-only)
         RESTport (read-only)
@@ -779,14 +768,16 @@ class Servald(object):
 
     '''
     STATUS_RUNNING = 10
-    def __init__(self, instancepath='', binpath='servald', auth=None,
-                 RESTport=REST_DEFAULT_PORT):
+    def __init__(self, instancepath=None, binpath=None, auth=None,
+                 RESTport=None):
         logd('Servald.init start')
+        instancepath = instancepath or ''
+        binpath = binpath or 'servald'
         self.binpath = os.path.expanduser(binpath)
         self.instancepath = os.path.abspath(os.path.expanduser(instancepath))
         if len(self.instancepath) > 74:
             raise ServalError(
-                'servald INSTANCEPATH may be too long to create socket'
+                'servald INSTANCEPATH may be too long to create socket '
                 'path. Please use a shorter instancepath.')
         self.auth = auth
         self._RESTport = RESTport
@@ -814,7 +805,9 @@ class Servald(object):
             255 on failure
         '''
         env = dict()
-        env['PATH'] = os.environ['PATH']
+        for var in ['PATH', 'LD_LIBRARY_PATH']:
+            if var in os.environ:
+                env[var] = os.environ[var]
         if self.instancepath:
             env['SERVALINSTANCE_PATH'] = self.instancepath
         fullargs = [self.binpath] + arglist
@@ -887,7 +880,8 @@ class Servald(object):
             res, out = self.exec_cmd(arglist=['start'])
         except OSError:
             raise ServalError('Unable to execute specified binpath:{}'
-                              .format(self.binpath))
+                        'servald return code:{} output:{}'
+                          .format(self.binpath, res, out))
         if res in (0, self.STATUS_RUNNING):
             self._update_params(out.decode('utf8'))
             return self
@@ -948,7 +942,7 @@ class Servald(object):
             key, value = line.split(':', 1)
             if key == 'http_port':
                 logd('_update_params: set RESTport to %s', value)
-                self._RESTport = value
+                self._RESTport = int(value)
                 break
 
 
@@ -980,15 +974,16 @@ logw = _logger.warning
 loge = _logger.error
 
 
-def _decode_json_list(stream):
+def _decode_rhizome_json_list(stream):
     '''Generator which yields dict objects decoded from the supplied
     unicode stream in Serval's REST response format. Closes the stream when
     finished.
     '''
     try:
+        line = next(stream)  # skip first line '{\n'
         line = next(stream)
     except StopIteration:
-        raise ValueError('Empty JSON list')
+        raise ValueError('Empty Rhizome JSON list')
     decoded = json.loads('{' + line[:-2] + '}')
     try:
         headers = decoded['header']
@@ -1010,7 +1005,7 @@ def _decode_json_list(stream):
         record = dict(zip(headers, row))
         yield record
     # If we reach here, it's an error
-    raise ValueError('No JSON list found')
+    raise ValueError('No Rhizome JSON list found')
 
 
 def _formatted_headers(dic):
@@ -1022,36 +1017,26 @@ def _formatted_headers(dic):
 
 
 def _get_post_bundle_params(bundle):
-    '''Use bundle attributes to populate a dict of parameters for a Rhizome
+    '''Use bundle attributes to populate a list of parameters for a Rhizome
     REST API request'''
     params = []
     if hasattr(bundle, 'id'):
-        params.append(('bundle-id', (None, bundle.id, 'text/plain')))
+        params.append(('bundle-id', bundle.id, 'text/plain'))
     if hasattr(bundle, 'author'):
-        params.append(('bundle-author',
-                       (None, bundle.author, 'text/plain')))
+        params.append(('bundle-author', bundle.author, 'text/plain'))
     if hasattr(bundle, 'secret'):
-        params.append(('bundle-secret', (None, bundle.secret, 'text/plain')))
+        params.append(('bundle-secret', bundle.secret, 'text/plain'))
 
     if hasattr(bundle, 'filehash'): #BROKEN
         del bundle['filehash'] #Workaround insert bug in rhizome
 
     params.append(('manifest',
-                   (None, io.BytesIO(bundle.get_unsigned_manifest()),
-                    bundle.manifest_content_type)
-                  )
-                 )
+                    bundle.get_unsigned_manifest(),
+                    bundle.manifest_content_type
+                  ))
     #payload must be AFTER manifest.
     if hasattr(bundle, 'payload'):
-        if bundle.payload is None:
-            logd('_get_post_bundle_params: PAYLOAD is None')
-            params.append(('payload',
-                           (None, '', bundle.payload_content_type)))
-        else:
-            if not hasattr(bundle.payload, 'read'):
-                iopayload = io.BytesIO(bundle.payload)
-            params.append(('payload',
-                           (None, iopayload, bundle.payload_content_type)))
+        params.append(('payload', bundle.payload, bundle.payload_content_type))
     else:
         logd('_get_post_bundle_params: NO PAYLOAD attr')
     return params
