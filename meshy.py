@@ -3,7 +3,7 @@
 #
 #  Python interface to the Serval mesh software
 #
-#  Copyright 2015-2016 Kevin Steen <ks@kevinsteen.net>
+#  Copyright 2015-2017 Kevin Steen <ks@kevinsteen.net>
 #
 #  This program is free software: you can redistribute it and/or modify
 #  it under the terms of the GNU Affero General Public License as
@@ -28,27 +28,17 @@ Example usage
 # Start and stop the Serval daemon (servald)
 
     import meshy
-    servald = meshy.start_servald(instancepath='~/runserval')
+    servald = meshy.Servald(instancepath='~/serval')
+    servald.start()
     print(servald.keyring)
     servald.stop_running_daemon()
-
-# Send a MeshMS to a telephone number
-
-    import meshy
-    servald = meshy.start_servald()
-    recipient = servald.find_SID(DID='555-1234')
-    print(recipient.SID, recipient.name)
-    me = servald.find_SID()[0]
-    conversation = servald.get_conversation(sender=me, recipient=recipient)
-    conversation.send('Working late - will be home soon')
-
 
 
 Functions
 ----------
 
-start_servald(...)
-    Start the servald daemon process. Returns a `Servald` instance
+test_instance(...)
+    Start a servald daemon process in ./test_instance. Returns a `Servald` instance
 
 
 Classes
@@ -78,12 +68,11 @@ import subprocess
 try:  # Python 3
     import http.client as http
     from urllib.parse import urlencode
-except ImportError:
-    # Python 2
+except ImportError:  # Python 2
     import httplib as http
     from urllib import urlencode
 
-__version_info__ = 0, 1, 0
+__version_info__ = 0, 2, 0
 
 _logger = logging.getLogger(__name__)
 
@@ -178,8 +167,13 @@ class PartialBundle(dict):
         for k in sorted(self):
             if self[k] is None:
                 result = k + '=<None>'
-            elif k in ['payload', 'signatures']:
+            elif k == 'signatures':
                 result = k + '=<{} bytes>'.format(len(self[k]))
+            elif k == 'payload':
+                if hasattr(self[k], 'len'):
+                    result = k + '=<{} bytes>'.format(len(self[k]))
+                else:  # Possibly a file-type object
+                    result = k + '<file>'
             elif k in ['id', 'filehash', 'recipient', 'sender', 'secret']:
                 result = k + "=<%s*>" % (self[k][:10])
             else:
@@ -304,6 +298,8 @@ class Bundle(PartialBundle):
 
 
 class BundleList(list):
+    '''Wrapper around a list of Bundles which produces a better display in
+    interactive use.'''
     def __init__(self, storage, *args):
         super(BundleList, self).__init__(*args)
         self.storage = storage
@@ -318,14 +314,12 @@ class BundleList(list):
         bundle = super(BundleList, self).__getitem__(key)
         if bundle.ispartial:
             bundle = self.storage.get_bundle_manifest(bundle)
-            self[key] = bundle #Might as well keep a reference to it
+            self[key] = bundle # Keep a reference to it
         return bundle
 
     def __repr__(self):
         result = [' #       id         |   service    |  size   |\n']
         for count, i in enumerate(self):
-            #if count != 0 : break
-            #print('BUNDLELIST REPR:',repr(i))
             result.append('{:>2} {:16}* {:15} {:>8} {:60}\n'
                           .format(count,
                                   i['id'][:16],
@@ -339,38 +333,36 @@ class BundleList(list):
 
 
 class SID(object):
-    '''Encapsulates the SID,DID,name fields of keyring entries
+    '''Serval Identity
     Attributes:
-        hexSID
-        DID
+        sid
+        did
         name
     '''
-    def __init__(self, hexSID=None, DID=None, name=None, mapping=None):
-        if hexSID:
-            self.hexsid = hexSID
-            self.DID = DID
+    def __init__(self, sid=None, did=None, name=None, mapping=None):
+        if sid:
+            self.sid = sid
+            self.did = did
             self.name = name
         else:
-            self.hexsid = mapping['sid']
-            self.DID = mapping.get('did')
+            self.sid = mapping['sid']
+            self.did = mapping.get('did')
             self.name = mapping.get('name')
-        self.shorthex = '{}*'.format(self.hexsid[:10])
+        if not self.name:
+            self.name = '[sid:{}*]'.format(self.sid[:10])
 
     def __repr__(self):
-        return 'SID(%r, DID=%r, name=%r)' % (
-               self.hexsid, self.DID, self.name)
+        return 'SID(%r, did=%r, name=%r)' % (
+               self.sid, self.did, self.name)
 
     def __str__(self):
-        if self.DID:
-            return '{0.name} ({0.DID}) sid:{0.shorthex}'.format(self).strip()
-        else:
-            return self.hexsid
+        return self.name
 
 
 class Keyring(object):
-    '''A Serval keyring returned by Servald.get_keyring()
+    '''A list-like object representing a Serval keyring returned by
+    Servald.get_keyring()
     Methods:
-        add
         create_SID
         lock (Not yet implemented)
     '''
@@ -380,20 +372,23 @@ class Keyring(object):
     # /restful/keyring/SID/set  params: pin, did, name
     # /restful/keyring/
     # returns: 200 + json, 404, 500
-    def __init__(self, api, RESTSIDlist):
-        logd('Keyring.init SIDlist=%r', RESTSIDlist)
+    def __init__(self, api, idlist):
+        logd('Keyring.init idlist=%r', idlist)
         self._api = api
-        self._SIDlist = [SID(mapping=d) for d in RESTSIDlist]
-
-    def add(self, pin=None):
-        '''Synonym for create_SID'''
-        return self.create_SID(pin=pin)
+        self._SIDlist = []
+        for d in idlist:
+            self._SIDlist.append(d)
+            logd('Keyring.init adding sid:%s', d)
 
     def create_SID(self, pin=None):
         '''Create a new SID optionally protected by `pin`. Returns
         the SID created.'''
-        sid_dict = self._api.GET_keyring_add('keyring/add', pin=pin)
-        return SID(mapping=sid_dict)
+        params = {}
+        if pin:
+            params['pin'] = pin
+        result = self._api.GET_json_simple('keyring/add', params)
+        new_sid = result['identity']
+        return SID(mapping=new_sid)
 
     def lock(self):
         '''Lock this keyring (forget the password)'''
@@ -405,12 +400,14 @@ class Keyring(object):
     def __iter__(self):
         return iter(self._SIDlist)
 
+    def __len__(self):
+        return len(self._SIDlist)
+
     def __repr__(self):
         return '\n'.join(repr(s) for s in self._SIDlist)
 
 
 class REST_API(object):
-    # TODO: Return RhizomeResponse or raise RhizomeError from relevant methods
     BASEPATH = '/restful/'
     DEFAULT_PORT = 4110
     def __init__(self, auth, port=None, timeout=None):
@@ -441,32 +438,18 @@ class REST_API(object):
         '''Generator: Make a request to the Serval REST API and decode the
         returned JSON list into dict() objects.'''
         response = self.GET(path=path, params=params)
+        if response.status != 200:
+            raise RESTError('{} {}'.format(response.status, response.reason))
         reader = codecs.getreader('utf8')
         result = reader(response)
-        return _decode_rhizome_json_list(stream=result)
+        return _decode_json(stream=result)
 
-    def keyring_add(self, path, pin=None):
-        '''Make a request to the Serval REST keyring add API expecting a
-        JSON result. Return a dict with a 'sid' key and value.
-        '''
-        #TODO:Tests for this function
-        data = ''
-        if pin:
-            data = '?' + urlencode({'pin':pin})
-        fullurl = self._baseurl + path + data
-        request = Request(fullurl)
-        val = bytearray(self._user + ':' + self._password, 'utf8')
-        request.add_header('Authorization', b'Basic ' + \
-            base64.b64encode(val))
-
-        logd('REST_API.GET_keyring_add: url:%s', fullurl)
-        response = urlopen(request, timeout=self.timeout)
-        logd('GET_keyring_add: response:{}, getcode():{}, info():{}'
-             .format(response, response.getcode(), response.info()))
+    def GET_json_simple(self, path, params=None):
+        response = self.GET(path=path, params=params)
         reader = codecs.getreader('utf8')
         result = reader(response)
-        res = json.loads(result.read())
-        return res['identity']
+        return json.loads(''.join(result))
+
 
     def fetch_meshms_conversationlist(self, my_sid):
         """Generator which yields dictionaries describing ???
@@ -482,28 +465,13 @@ class REST_API(object):
         }
         """
         path = 'meshms/{}/conversationlist.json'.format(my_sid)
-        fullurl = self._baseurl + path
-        request = Request(fullurl)
-        val = bytearray(self._user + ':' + self._password, 'utf8')
-        request.add_header('Authorization', b'Basic ' + \
-            base64.b64encode(val))
-
-        #TODO: Catch & report HTTP errors
-        response = urlopen(request, timeout=self.timeout)
-        #logd('fetch_meshms_conversationlist: response:{}, getcode():{}, info():{}'
-        #     .format(response, response.getcode(), response.info()))
-        reader = codecs.getreader('utf8')
-        stream = reader(response)
-        try:
-            line = next(stream)  # skip first line '{\n'
-        except StopIteration:
-            raise ValueError('Empty JSON list')
-        return _decode_json_list(stream=stream)
+        preheaders, results = self.GET_json_list(path)
+        return results
 
 
     def fetch_meshms_messagelist(self, my_sid, their_sid):
         """Generator which yields dictionaries describing each message
-        send between mysid and theirsid.
+        sent between my_sid and their_sid.
         """
         """
         {
@@ -518,27 +486,16 @@ class REST_API(object):
         ]
         }
         """
+        #TODO: Tests for this function
         path = 'meshms/{}/{}/messagelist.json'.format(
                     my_sid, their_sid)
-        fullurl = self._baseurl + path
-        request = Request(fullurl)
-        val = bytearray(self._user + ':' + self._password, 'utf8')
-        request.add_header('Authorization', b'Basic ' + \
-            base64.b64encode(val))
-
-        #TODO: Catch & report HTTP errors
-        response = urlopen(request, timeout=self.timeout)
-        #logd('fetch_meshms_messagelist: response:{}, getcode():{}, info():{}'
-        #     .format(response, response.getcode(), response.info()))
-        reader = codecs.getreader('utf8')
-        stream = reader(response)
+        logd('REST_API.fetch_meshms_messagelist %s %s' % (my_sid, their_sid))
+        logd('REST_API.fetch_meshms_messagelist:%s' % path)
         try:
-            line = next(stream)  # skip first line '{\n'
-            line = next(stream)  # skip '"read_offset":0,'
-            line = next(stream)  # skip '"latest_ack_offset":359,'
-        except StopIteration:
-            raise ValueError('Empty JSON list')
-        return _decode_json_list(stream=stream)
+            preheaders, results = self.GET_json_list(path)
+            return results
+        except RESTError:
+            return []
 
     def post_bundle(self, path, params):
         '''Send a POST request to the REST API. Returns the Response object
@@ -589,10 +546,13 @@ class REST_API(object):
 class Rhizome(object):
     '''Interface to the Serval Rhizome functionality
     Rhizome(auth=(user, password), [RESTport])
+    Iterating over this object produces a list of PartialBundles
+    representing every Bundle in the Rhizome store.
+
     Attributes:
-        bundles : list of bundles
+        bundles : list of all bundles in the Rhizome store
     Methods:
-        fetch_bundles
+        find_bundles
             List bundles, optionally filtered
         get_bundle_manifest
             get the full manifest of a bundle
@@ -621,21 +581,22 @@ class Rhizome(object):
 
     @property
     def bundles(self):
-        bundlelist = list(self.fetch_bundles())
-        rhizome = self
-        return BundleList(rhizome, bundlelist)
+        return BundleList(self, self.find_bundles())
 
-    def fetch_bundles(self, **filters):
+    def find_bundles(self, **filters):
         '''Generator which produces bundles matching ALL filters.
         Each filter is of the form : fieldname=value
         Supported fieldnames are those returned by the Rhizome REST call
         'bundlelist.json' '''
-        return self._filter_bundles(
-            source=self._api.GET_json_list('rhizome/bundlelist.json'),
-            template=filters)
+        headers, results=self._api.GET_json_list('rhizome/bundlelist.json')
+        return BundleList(self,
+            self._filter_bundles(
+                source=results,
+                template=filters)
+            )
 
     def _filter_bundles(self, source, template):
-        '''Workhorse for Rhizome.fetch_bundles'''
+        '''Workhorse for Rhizome.find_bundles'''
         #logd('_filter_bundles START. template=%r', template)
         for dic in source:
             #logd('_filter_bundles checking dic: %r %r', dic['service'], dic['name'])
@@ -643,11 +604,10 @@ class Rhizome(object):
                 #logd('_filter_bundles MATCHED dic:%r %r', dic['service'], dic['name'])
                 partialbundle = self._create_bundle(dic)
                 yield partialbundle
-            #logd('')
-        #logd('_filter_bundles DONE')
 
     def get_bundle_manifest(self, bundle):
-        '''Return the supplied Bundle with fields updated from Rhizome
+        '''Return a full Bundle based on the supplied PartialBundle with
+        all fields (except 'payload') retrieved from Rhizome
         '''
         #TODO: rename to get_bundle and accept a bundle or id
         #GET /restful/rhizome/BID.rhm
@@ -710,6 +670,9 @@ class Rhizome(object):
             pass
         return PartialBundle(dic)
 
+    def __iter__(self):
+        return self.bundles.__iter__()
+
     def __repr__(self):
         return ('Rhizome(auth=(%r, REDACTED), RESTport=%r)' %
             (self.auth[0], self.RESTport))
@@ -769,129 +732,30 @@ class Servald(object):
     '''
     STATUS_RUNNING = 10
     def __init__(self, instancepath=None, binpath=None, auth=None,
-                 RESTport=None):
+                 RESTport=None, system=False):
         logd('Servald.init start')
-        instancepath = instancepath or ''
+        if instancepath is None and system==False:
+            raise ServalError(''
+                'To access the default instance (instancepath=None) you '
+                'must also supply the parameter: system=True \n'
+                'To launch a quick, test instance in a "run" folder off the '
+                'current working directory, use:\n'
+                "    d=%s.start_servald('run')" % __name__
+                )
         binpath = binpath or 'servald'
         self.binpath = os.path.expanduser(binpath)
-        self.instancepath = os.path.abspath(os.path.expanduser(instancepath))
-        if len(self.instancepath) > 74:
-            raise ServalError(
-                'servald INSTANCEPATH may be too long to create socket '
-                'path. Please use a shorter instancepath.')
-        self.auth = auth
-        self._RESTport = RESTport
-
-    @property
-    def RESTport(self):
-        return self._RESTport
-
-    @property
-    def keyring(self):
-        if self.auth is None:
-            self.auth = self.get_REST_default_credentials()
-        api = REST_API(auth=self.auth, port=self._RESTport)
-        return Keyring(
-            api=api,
-            RESTSIDlist=api.GET_json_list('keyring/identities.json')
-            )
-
-    def exec_cmd(self, arglist):
-        '''Pass the arglist to this instance of servald and return both
-        the return code and a string of stdout+stderr.
-        `servald` returns :
-            0 on success if the server is running
-            1 on success if the server is stopped
-            255 on failure
-        '''
-        env = dict()
-        for var in ['PATH', 'LD_LIBRARY_PATH']:
-            if var in os.environ:
-                env[var] = os.environ[var]
-        if self.instancepath:
-            env['SERVALINSTANCE_PATH'] = self.instancepath
-        fullargs = [self.binpath] + arglist
-        try:  # TODO:Possible to return stdout, stderr seperately?
-            return 0, subprocess.check_output(args=fullargs,
-                                       env=env,
-                                       stderr=subprocess.STDOUT)
-        except subprocess.CalledProcessError as e:
-            return e.returncode, e.output
-
-    def get_keyring(self, pin=None):
-        if pin:
-            params = {'pin': pin}
+        if instancepath:
+            self.instancepath = os.path.abspath(os.path.expanduser(instancepath))
+            if len(self.instancepath) > 74:
+                raise ServalError(
+                    'servald INSTANCEPATH may be too long to create socket '
+                    'path. Please use a shorter instancepath.')
+        if auth:
+            self.auth = auth
         else:
-            params = None
-        api = REST_API(auth=self.auth, port=self._RESTport)
-        return Keyring(
-            api=api,
-            RESTSIDlist=self._api.GET_json_list('keyring/identities.json',
-                                                params)
-            )
-    def get_monitor_socket(self):
-        '''Return a stream socket connected to this servald instance. Caller
-        is responsible for closing the socket when done.'''
-        # Monitor connection supports these monitors
-        # (from monitor.c, monitor_set function)
-        # vomp, rhizome, peers, dnahelper, links, quit, interface
-        monitor_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock_addr = '\x00' + self.instancepath[1:] + '/monitor.socket'
-        logd('Connecting to monitor socket:%r', sock_addr)
-        try:
-            monitor_socket.connect(sock_addr)
-        except socket.error:
-            sock_addr = self.instancepath + '/monitor.socket'
-            logd('Connecting to monitor socket:%r', sock_addr)
-            try:
-                monitor_socket.connect(sock_addr)
-            except socket.error:
-                loge('get_monitor_socket:Unable to connect to monitor socket')
-                raise ServalError('Unable to connect to monitor socket')
-        return monitor_socket
-
-    def fetch_meshms_messagelist(self, my_sid, their_sid):
-        if self.auth is None:
-            self.auth = self.get_REST_default_credentials()
-        api = REST_API(auth=self.auth, port=self._RESTport)
-        return api.fetch_meshms_messagelist(my_sid=my_sid,
-                                            their_sid=their_sid)
-
-    def get_REST_default_credentials(self):
-        '''Returns the default credentials to access the REST API. This will
-        be called automatically if you don't supply the auth parameter
-        on Servald creation.'''
-        #TODO: Generate a random password
-        self.config_set('api.restful.users.test.password', 'testpass')
-        return ('test', 'testpass')
-
-    def get_rhizome(self):
-        '''Returns the Rhizome instance for this servald'''
-        if self.auth is None:
-            self.auth = self.get_REST_default_credentials()
-        return Rhizome(auth=self.auth, RESTport=self._RESTport)
-
-    def start(self):
-        '''Start the servald daemon, returning the Servald object if
-        succesful. Raises ServalError on any error
-        '''
-        logd('Servald.start')
-        try:
-            res, out = self.exec_cmd(arglist=['start'])
-        except OSError:
-            raise ServalError('Unable to execute specified binpath:{}'
-                        'servald return code:{} output:{}'
-                          .format(self.binpath, res, out))
-        if res in (0, self.STATUS_RUNNING):
-            self._update_params(out.decode('utf8'))
-            return self
-        raise ServalError('Unknown return code ({}) from servald. '
-            'Check the serval logs for more information. Output:{}'
-            .format(res, out))
-
-    def stop_running_daemon(self):  # long name for safety
-        '''Request the serval daemon to stop running'''
-        return self.exec_cmd(arglist=['stop'])
+            self.auth = self._create_auth()
+        self.RESTport = RESTport
+        self._api = REST_API(auth=self.auth, port=self.RESTport)
 
     def config_set(self, key, value):
         '''Set the servald configuration `key` to `value`. key and
@@ -922,6 +786,158 @@ class Servald(object):
             loge(msg)
             raise ServalError(msg)
 
+    def exec_cmd(self, arglist):
+        '''Pass the arglist to this instance of servald and return both
+        the return code and a bytestring of stdout+stderr.
+        `servald` returns :
+            0 on success if the server is running
+            1 on success if the server is stopped
+            255 on failure
+        '''
+        # TODO: Convert a space-seperated string to arglist
+        env = dict()
+        for var in ['PATH', 'LD_LIBRARY_PATH']:
+            if var in os.environ:
+                env[var] = os.environ[var]
+        if self.instancepath:
+            env['SERVALINSTANCE_PATH'] = self.instancepath
+        fullargs = [self.binpath] + arglist
+        try:  # TODO:Possible to return stdout, stderr seperately?
+            return 0, subprocess.check_output(args=fullargs,
+                                       env=env,
+                                       )#stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as e:
+            return e.returncode, e.output
+
+    def fetch_meshms_messagelist(self, my_sid, their_sid):
+        return self._api.fetch_meshms_messagelist(my_sid=my_sid,
+                                            their_sid=their_sid)
+
+    def get_keyring(self, pin=None):
+        if pin:
+            params = {'pin': pin}
+        else:
+            params = None
+        headers, idlist = self._api.GET_json_list('keyring/identities.json', params)
+        return Keyring(
+            api=self._api,
+            idlist=idlist
+            )
+
+    def get_monitor_socket(self):
+        '''Return a stream socket connected to this servald instance. Caller
+        is responsible for closing the socket when done.'''
+        # Monitor connection supports these monitors
+        # (from monitor.c, monitor_set function)
+        # vomp, rhizome, peers, dnahelper, links, quit, interface
+        monitor_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock_addr = '\x00' + self.instancepath[1:] + '/monitor.socket'
+        logd('Connecting to monitor socket:%r', sock_addr)
+        try:
+            monitor_socket.connect(sock_addr)
+        except socket.error:
+            sock_addr = self.instancepath + '/monitor.socket'
+            logd('Connecting to monitor socket:%r', sock_addr)
+            try:
+                monitor_socket.connect(sock_addr)
+            except socket.error:
+                loge('get_monitor_socket:Unable to connect to monitor socket')
+                raise ServalError('Unable to connect to monitor socket')
+        return monitor_socket
+
+    @property
+    def id_self(self):
+        'Returns a SID object representing our own id'
+        res, output = self.exec_cmd(['id', 'self'])
+        output = output.decode('utf8')
+        count, _, sid = output.split('\n')[:3]
+        return SID(sid=sid)
+
+    @property
+    def keyring(self):
+        return self.get_keyring()
+
+    @staticmethod
+    def parse_monitor_stream(buf):
+        '''Parse output from the servald monitor stream. `buf` must be bytes
+        Returns a tuple: (eventlist, buf)
+        Where :
+            buf contains data remaining after parsing fully-formed events
+            eventlist is a list of tuples: (eventtype, data)
+        eventtype is one of:
+            'BINARY' : data = (header, data)
+            'LINK'
+            'NEWPEER' : data = hex representation of SID
+            'OLDPEER' : data = hex representation of SID
+            'UNKNOWN' : data = the line read from the monitor stream
+        TODO: Not all Serval events are decoded
+        '''
+        # See serval-dna/monitor.c
+        # 'INTERFACE:eth0:UP'
+        # 'HANGUP:00f9a5'
+        # call start:'CALLSTATUS:00f9a5:006ec1:6:2:0:6DEEF513773A953FD9BAE28B30F854D90F3BF289644CD750F987C34E291D055A:33FE98B9ED39A0C87F37583E72ED51140A65AD68C0D12B4D90F118476202E657:5551111:5553333'
+        # call ended:'CALLSTATUS:00f9a5:006ec1:6:6:0:6DEEF513773A953FD9BAE28B30F854D90F3BF289644CD750F987C34E291D055A:33FE98B9ED39A0C87F37583E72ED51140A65AD68C0D12B4D90F118476202E657:5551111:5553333'
+        eventlist = []
+        logd('Monitor received:%r' % buf)
+        while buf:
+            try:
+                line, buf = buf.split(b'\n', 1) # Py2 doesn't like maxsplit
+            except ValueError:
+                break
+            if not line: continue
+            logd('Monitor line:%r' % line)
+            if line.startswith(b'*'):  # Binary data
+                # Binary data. First int is # of bytes to read after the end
+                # of the current line
+                size, header = line[1:].split(b':', 1)
+                try:
+                    bytes_to_read = int(size)
+                    logd('NEED TO READ %s BYTES FROM MONITOR' % bytes_to_read)
+                    data = buf[:bytes_to_read]
+                    buf = buf[bytes_to_read:]
+                    eventlist.append( ('BINARY',(header,data)) )
+                except (ValueError):
+                    loge('Unknown Monitor event: %r', line)
+            #~ elif line.startswith(b'MONITORSTATUS:'):
+                #~ eventlist.append( ('MONITORSTATUS', line) )
+            #~ elif line.startswith(b'LINK:'):
+                #~ eventlist.append( ('LINK', line) )
+            elif line.startswith(b'NEWPEER:'):
+                eventlist.append( ('NEWPEER', line[8:].decode('utf8')) )
+            elif line.startswith(b'OLDPEER:'):
+                eventlist.append( ('OLDPEER', line[8:].decode('utf8')) )
+            else:
+                logw('Monitor received unknown line:%r', line)
+                eventlist.append( ('UNKNOWN', line) )
+        return (eventlist, buf)
+
+    @property
+    def rhizome(self):
+        '''Returns the Rhizome instance for this servald'''
+        return Rhizome(auth=self.auth, RESTport=self.RESTport)
+
+    def start(self):
+        '''Start the servald daemon, returning the Servald object if
+        succesful. Raises ServalError on any error
+        '''
+        logd('Servald.start')
+        try:
+            res, out = self.exec_cmd(arglist=['start'])
+        except OSError:
+            raise ServalError('Unable to execute specified binpath:{}'
+                        'servald return code:{} output:{}'
+                          .format(self.binpath, res, out))
+        if res in (0, self.STATUS_RUNNING):
+            self._update_params(out.decode('utf8'))
+            return self
+        raise ServalError('Unknown return code ({}) from servald. '
+            'Check the serval logs for more information. Output:{}'
+            .format(res, out))
+
+    def stop_running_daemon(self):  # long name for safety
+        '''Request the serval daemon to stop running'''
+        return self.exec_cmd(arglist=['stop'])
+
     # --- Context Manager implementation ------
     def __enter__(self):
         # Must return the object to be used with the 'as' clause
@@ -931,9 +947,18 @@ class Servald(object):
         # Return True to suppress supplied exception.
         self.stop_running_daemon()
 
+    # --- Internal functions ------------------
+    def _create_auth(self):
+        '''Returns the default credentials to access the REST API. This will
+        be called automatically if you don't supply the auth parameter
+        on Servald creation.'''
+        #TODO: Generate a random password
+        self.config_set('api.restful.users.meshy.password', 'meshy')
+        return ('meshy', 'meshy')
+
     def __repr__(self):
         return ('Servald(instancepath=%r, binpath=%r, RESTport=%r)'
-                % (self.instancepath, self.binpath, self._RESTport))
+                % (self.instancepath, self.binpath, self.RESTport))
 
     def _update_params(self, servald_output):
         '''Update our attributes with values from servald output'''
@@ -966,6 +991,9 @@ class ServalError(MeshyError):
     pass
 
 
+class RESTError(MeshyError):
+    pass
+
 # Internal Functions -------------------------------------------------
 #
 
@@ -974,38 +1002,73 @@ logw = _logger.warning
 loge = _logger.error
 
 
-def _decode_rhizome_json_list(stream):
-    '''Generator which yields dict objects decoded from the supplied
-    unicode stream in Serval's REST response format. Closes the stream when
-    finished.
+DEBUG_HTTP = False
+def _decode_json(stream):
+    '''Decodes the JSON from a serval REST response.
+    Returns a tuple of (headersdict, rows_generator) where:
+    headersdict
+        Is a dictionary of JSON name:value pairs which appear before the 'headers' line
+    rows_generator
+        Is a generator which yields dict objects decoded from the rest of the stream
+
+    Closes the stream when finished.
     '''
+    def decode_row_stream(stream, header, source):
+        logd('decode_row_stream starting. header:%s' % header)
+        done = False
+        for line in stream:
+            if DEBUG_HTTP: source += line
+            logd('line:%s' % line)
+            if line == ']\n':  # Last line
+                stream.close()
+                logd('decode_row_stream finished')
+                return
+            if line.endswith('\n'):
+                line = line[:-1]
+            if line.endswith(','):
+                line = line[:-1]
+            logd('final line:%s' % line)
+            row = json.loads(line)
+            logd('row:%s' % row)
+            logd('header:%s' % header)
+            record = dict(zip(header, row))
+            logd('decode_row_stream: yielding object: %r', record)
+            yield record
+
+    logd('decode_json starting.')
+    source = ''
+    prefix_dict = {}
+    state = 'parse_prefix_headers' # then header_found, done
+    line = ''
     try:
-        line = next(stream)  # skip first line '{\n'
-        line = next(stream)
+        line = next(stream)  # Skip initial '{'
+        #logd('line:%s' % line)
+        for line in stream:
+            #logd('line:%s' % line)
+            if DEBUG_HTTP: source += line
+            if line.endswith('\n'):
+                line = line[:-1]
+            if line.endswith(','):
+                line = line[:-1]
+            row = json.loads('{' + line + '}')
+            if state=='parse_prefix_headers':
+                if 'header' in row:
+                    state = 'header_found'
+                    junk = next(stream)  # skip "rows":[
+                    logd('returning prefix_dict:%s' % prefix_dict)
+                    return (prefix_dict, decode_row_stream(stream, row['header'], source))
+                else:
+                    prefix_dict.update(row)
     except StopIteration:
-        raise ValueError('Empty Rhizome JSON list')
-    decoded = json.loads('{' + line[:-2] + '}')
-    try:
-        headers = decoded['header']
-    except KeyError:
-        raise ValueError('Could not decode header line.')
-    line = next(stream)  # skip line
-    for line in stream:
-        if line == ']\n':  # Last line
-            stream.close()
-            return
-        if line.endswith(',\n'):
-            data = line[:-2]
-        else:
-            data = line[:-1]
-        try:
-            row = json.loads(data)
-        except ValueError:
-            raise ValueError('Could not decode row:{}'.format(line))
-        record = dict(zip(headers, row))
-        yield record
-    # If we reach here, it's an error
-    raise ValueError('No Rhizome JSON list found')
+        logd('Premature end of JSON stream. state=%s\n' % state + source)
+        raise ValueError('Invalid JSON stream')
+    except Exception:
+        logd('Exception:Unable to parse JSON stream. state=%s line=%s source:\n%s' %
+            (state, repr(line), source))
+        raise
+    #Reaching here is an error
+    logd('Unable to parse JSON stream. state=%s\n' % state + source)
+    raise ValueError('Invalid JSON stream')
 
 
 def _formatted_headers(dic):
@@ -1071,8 +1134,10 @@ def _matches_template(mapping, template):
 # Public Functions ---------------------------------------------------
 #
 
-def start_servald(instancepath=None, binpath=None):
-    '''Start the servald daemon binary and return a Servald instance
+def test_instance(instancepath='test_instance', binpath='./servald'):
+    '''Start a test instance of the serval daemon in the 'test_instance'
+    directory, creating it if necessary. Uses './servald' executable
+    All interfaces are enabled in the configuration.
     Parameters:
         instancepath : (optional)
             The directory to pass as SERVALINSTANCE_PATH to servald
@@ -1083,6 +1148,10 @@ def start_servald(instancepath=None, binpath=None):
     Context Manager.
     '''
     servald = Servald(instancepath=instancepath, binpath=binpath)
+    servald.config_update({
+        'interfaces.0.match':'*',
+        'interfaces.0.type': 'ethernet',
+        })
     servald.start()
     return servald
 

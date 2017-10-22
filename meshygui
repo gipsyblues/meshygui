@@ -61,13 +61,14 @@ COLORS = {
 
 def main(argv):
     logging.basicConfig(
-                    format='%(asctime)s:%(name)s:%(levelname)s:%(message)s',
+                    format='%(asctime)s:%(levelname)s:%(name)s:%(funcName)s:%(message)s',
                     datefmt = '%H:%M:%S',
                     level=logging.DEBUG,
                     )
-    instancepath = os.environ.get('SERVALINSTANCE_PATH')
     if len(argv) > 1:
         instancepath = argv[1]
+    else:
+        instancepath = os.environ.get('SERVALINSTANCE_PATH')
     if not instancepath:
         instancepath = DEFAULT_INSTANCEPATH
     root = tk.Tk()
@@ -333,11 +334,12 @@ class DaemonController(object):
         self._init_from_running_servald()
 
     def list_messages(self, my_sid, their_sid):
+        logd('(my_sid=%s, their_sid=%s)' % (my_sid, their_sid))
         return self.servald.fetch_meshms_messagelist(my_sid=my_sid,
                                                      their_sid=their_sid)
 
-    def list_messages_cli(self, sender, recipient):
-        cmd = 'meshms list messages {} {}'.format(sender, recipient)
+    def list_messages_cli(self, my_sid, their_sid):
+        cmd = 'meshms list messages {} {}'.format(my_sid, their_sid)
         res, out = self.servald.exec_cmd(cmd.split())
         #TODO:Get unicode output from meshy
         out = out.decode('utf8')
@@ -362,7 +364,10 @@ class DaemonController(object):
             data = self.monitor_socket.recv(512)
             if data:
                 # ignore incoming data
-                self._process_monitor_announcement(data)
+                try:
+                    self._process_monitor_announcement(data)
+                except Exception as e:
+                    loge('Exception while processing monitor announcement: %s', e)
             else:  # End of File. Remote closed
                 self.monitor_socket.close()
                 resched = False
@@ -392,14 +397,16 @@ class DaemonController(object):
     def _init_from_running_servald(self):
         self._init_monitor_socket(self.servald)
         # TODO: Create a method on MainWindow:
-        curr_id = self.servald.keyring[0]
-        logi('Current Id:%s', curr_id)
+        #~ curr_id = self.servald.keyring[0]
+        #~ logi('Current Id:%s', curr_id)
+        curr_id = self.servald.id_self
+        logd('Current id:%s', curr_id)
         self.main_obj.set_current_id(curr_id)
         self.indicator['style'] = 'running.ServaldFrame.TLabelframe'
 
     def _init_monitor_socket(self, servald):
         self.monitor_socket = servald.get_monitor_socket()
-        mons = 'vomp rhizome peers dnahelper links interface'  # quit
+        mons = 'rhizome peers dnahelper links interface'  # vomp quit
         for mon in mons.split():
             self.monitor_socket.send('monitor {}\n'.format(mon).encode('utf8'))
         # Schedule a poll
@@ -408,28 +415,16 @@ class DaemonController(object):
     def _process_monitor_announcement(self, buf):
         '''Parse and process output from a servald monitor.
         buf must be bytes'''
-        #TODO:Don't assume entire message will appear in one call
-        # 'INTERFACE:eth0:UP'
-        # 'HANGUP:00f9a5'
-        # call start:'CALLSTATUS:00f9a5:006ec1:6:2:0:6DEEF513773A953FD9BAE28B30F854D90F3BF289644CD750F987C34E291D055A:33FE98B9ED39A0C87F37583E72ED51140A65AD68C0D12B4D90F118476202E657:5551111:5553333'
-        # call ended:'CALLSTATUS:00f9a5:006ec1:6:6:0:6DEEF513773A953FD9BAE28B30F854D90F3BF289644CD750F987C34E291D055A:33FE98B9ED39A0C87F37583E72ED51140A65AD68C0D12B4D90F118476202E657:5551111:5553333'
-        for line in buf.split(b'\n'):
-            if not line: continue
-            if line.startswith(b'*'):
-                logd('NEED TO READ SOME BYTES FROM MONITOR')  # BROKEN
+        #TODO:Don't assume entire message will appear in one buf
+        eventlist, buf = self.servald.parse_monitor_stream(buf)
+        for etype, edata in eventlist:
+            if 'BINARY' == etype:
                 # Might be an incoming bundle. Try displaying messages
                 self.main_obj.peer_tab_obj.display_messages()
-                break
-            elif line.startswith(b'MONITORSTATUS:'):
-                continue
-            elif line.startswith(b'LINK:'):
-                logd('Monitor:LINK:%r', line)
-            elif line.startswith(b'NEWPEER:'):
-                self.register_peer(line[8:].decode('utf8'))
-            elif line.startswith(b'OLDPEER:'):
-                self.unregister_peer(line[8:].decode('utf8'))
-            else:
-                logd('Monitor received:%r', line)
+            elif 'NEWPEER' == etype:
+                self.register_peer(edata)
+            elif 'OLDPEER' == etype:
+                self.unregister_peer(edata)
 
 
 
@@ -571,7 +566,7 @@ class PeerTab(object):
 
     def _send_message(self, text):
         self.main_obj.daemon_obj.send_message(
-            sender=self.main_obj.current_id.hexsid,
+            sender=self.main_obj.current_id.sid,
             recipient=self.sid,
             message=text,
             )
@@ -584,7 +579,7 @@ class PeerTab(object):
 
         # Reverse message order & keep only required fields:
         for msg in self.main_obj.daemon_obj.list_messages(
-                                    my_sid=self.main_obj.current_id.hexsid,
+                                    my_sid=self.main_obj.current_id.sid,
                                     their_sid=self.sid):
             msglist.appendleft({
                 'timestamp': msg['timestamp'],
