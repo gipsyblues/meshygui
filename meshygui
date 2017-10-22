@@ -575,6 +575,8 @@ class PeerTab(object):
         self.display_messages()
 
     def display_messages(self):
+        self.msg_w['state'] = 'normal'
+        self.msg_w.delete('1.0', 'end')
         if not self.sid:
             return
         msglist = deque()#maxlen=15)
@@ -589,8 +591,6 @@ class PeerTab(object):
                 'type': msg['type'],
                 })
 
-        self.msg_w['state'] = 'normal'
-        self.msg_w.delete('1.0', 'end')
         for msg in msglist:
             tags = ()
             if msg['type'] == '<' :
