@@ -280,27 +280,25 @@ class DaemonController(object):
         try:  # TODO:Cleaner implementation required
             self.servald = meshy.Servald(instancepath=instancepath,
                                          binpath='./servald')
+            res, out = self.servald.exec_cmd(['status'])
+        except (meshy.ServalError, FileNotFoundError):
             try:
+                self.servald = meshy.Servald(instancepath=instancepath)
                 res, out = self.servald.exec_cmd(['status'])
             except OSError:
-                self.servald = meshy.Servald(instancepath=instancepath)
-                try:
-                    res, out = self.servald.exec_cmd(['status'])
-                except OSError:
-                    messagebox.showerror(
-                        title='Cannot execute `servald`',
-                        message='Cannot execute `servald`',
-                        detail='The executable `servald` must be in your '
-                            'PATH or in the current directory.',
-                        icon='error',
-                        )
-                    res = 1
-            parent['text'] = ' %s ' % self.servald.instancepath
-            if res == 0:
-                self._init_from_running_servald()
-        except meshy.ServalError:
-            self.main_obj.output('Unable to initialise serval. Please check '
-                'the serval logs for details')
+                self.main_obj.output('Unable to initialise serval. Please check '
+                    'the serval logs for details')
+                messagebox.showerror(
+                    title='Cannot execute `servald`',
+                    message='Cannot execute `servald`',
+                    detail='The executable `servald` must be in your '
+                        'PATH or in the current directory.',
+                    icon='error',
+                    )
+                res = 1
+        if res == 0:
+            self._init_from_running_servald()
+        parent['text'] = ' %s ' % self.servald.instancepath
 
     def cmd_run_servalcmd(self, *ign):
         cmd = self.servalcmd.get().strip().split()
