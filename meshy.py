@@ -794,7 +794,8 @@ class Servald(object):
             1 on success if the server is stopped
             255 on failure
         '''
-        # TODO: Convert a space-seperated string to arglist
+        if isinstance(arglist, str):
+            arglist = arglist.split()  # Split string on whitespace
         env = dict()
         for var in ['PATH', 'LD_LIBRARY_PATH']:
             if var in os.environ:
@@ -847,11 +848,15 @@ class Servald(object):
 
     @property
     def id_self(self):
-        'Returns a SID object representing our own id'
+        '''Returns a SID object representing our own id, or None if we don't
+        have one yet'''
         res, output = self.exec_cmd(['id', 'self'])
         output = output.decode('utf8')
         count, _, sid = output.split('\n')[:3]
-        return SID(sid=sid)
+        try:
+            return SID(sid=sid)
+        except TypeError:
+            return None
 
     @property
     def keyring(self):
@@ -1018,24 +1023,24 @@ def _decode_json(stream):
         done = False
         for line in stream:
             if DEBUG_HTTP: source += line
-            logd('line:%s' % line)
+            #logd('line:%s' % line)
             if line == ']\n':  # Last line
                 stream.close()
-                logd('decode_row_stream finished')
+                #logd('decode_row_stream finished')
                 return
             if line.endswith('\n'):
                 line = line[:-1]
             if line.endswith(','):
                 line = line[:-1]
-            logd('final line:%s' % line)
+            #logd('final line:%s' % line)
             row = json.loads(line)
-            logd('row:%s' % row)
-            logd('header:%s' % header)
+            #logd('row:%s' % row)
+            #logd('header:%s' % header)
             record = dict(zip(header, row))
-            logd('decode_row_stream: yielding object: %r', record)
+            #logd('decode_row_stream: yielding object: %r', record)
             yield record
 
-    logd('decode_json starting.')
+    #logd('decode_json starting.')
     source = ''
     prefix_dict = {}
     state = 'parse_prefix_headers' # then header_found, done
@@ -1055,19 +1060,19 @@ def _decode_json(stream):
                 if 'header' in row:
                     state = 'header_found'
                     junk = next(stream)  # skip "rows":[
-                    logd('returning prefix_dict:%s' % prefix_dict)
+                    #logd('returning prefix_dict:%s' % prefix_dict)
                     return (prefix_dict, decode_row_stream(stream, row['header'], source))
                 else:
                     prefix_dict.update(row)
     except StopIteration:
-        logd('Premature end of JSON stream. state=%s\n' % state + source)
+        loge('Premature end of JSON stream. state=%s\n' % state + source)
         raise ValueError('Invalid JSON stream')
     except Exception:
-        logd('Exception:Unable to parse JSON stream. state=%s line=%s source:\n%s' %
+        loge('Exception:Unable to parse JSON stream. state=%s line=%s source:\n%s' %
             (state, repr(line), source))
         raise
     #Reaching here is an error
-    logd('Unable to parse JSON stream. state=%s\n' % state + source)
+    loge('Unable to parse JSON stream. state=%s\n' % state + source)
     raise ValueError('Invalid JSON stream')
 
 
