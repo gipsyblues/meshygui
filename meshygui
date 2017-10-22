@@ -398,8 +398,12 @@ class DaemonController(object):
         #~ curr_id = self.servald.keyring[0]
         #~ logi('Current Id:%s', curr_id)
         curr_id = self.servald.id_self
-        logd('Current id:%s', curr_id)
-        self.main_obj.set_current_id(curr_id)
+        if curr_id:
+            logd('Current id:%s', curr_id)
+            self.main_obj.set_current_id(curr_id)
+        else:  # Generate an id
+            curr_id = self.servald.keyring.create_SID()
+            logi('Generated a new ID:%s' % curr_id)
         self.indicator['style'] = 'running.ServaldFrame.TLabelframe'
 
     def _init_monitor_socket(self, servald):
