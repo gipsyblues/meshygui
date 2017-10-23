@@ -286,11 +286,11 @@ class DaemonController(object):
         logi('Using serval instance:%s', instancepath)
         try:  # TODO:Cleaner implementation required
             self.servald = meshy.Servald(instancepath=instancepath,
-                                         binpath='./servald')
+                                         binpath='./servald').start()
             res, out = self.servald.exec_cmd(['status'])
         except (meshy.ServalError, FileNotFoundError):
             try:
-                self.servald = meshy.Servald(instancepath=instancepath)
+                self.servald = meshy.Servald(instancepath=instancepath).start()
                 res, out = self.servald.exec_cmd(['status'])
             except OSError:
                 self.main_obj.output('Unable to initialise serval. Please check '

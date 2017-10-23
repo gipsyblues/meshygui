@@ -738,9 +738,9 @@ class Servald(object):
             raise ServalError(''
                 'To access the default instance (instancepath=None) you '
                 'must also supply the parameter: system=True \n'
-                'To launch a quick, test instance in a "run" folder off the '
+                "To launch in the 'test_instance'' folder off the "
                 'current working directory, use:\n'
-                "    d=%s.start_servald('run')" % __name__
+                "    d=%s.test_instance()" % __name__
                 )
         binpath = binpath or 'servald'
         self.binpath = os.path.expanduser(binpath)
@@ -972,7 +972,7 @@ class Servald(object):
             key, value = line.split(':', 1)
             if key == 'http_port':
                 logd('_update_params: set RESTport to %s', value)
-                self._RESTport = int(value)
+                self.RESTport = int(value)
                 break
 
 
