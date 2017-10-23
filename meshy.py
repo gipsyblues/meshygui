@@ -912,7 +912,7 @@ class Servald(object):
             elif line.startswith(b'OLDPEER:'):
                 eventlist.append( ('OLDPEER', line[8:].decode('utf8')) )
             else:
-                logw('Monitor received unknown line:%r', line)
+                logi('Monitor received unknown line:%r', line)
                 eventlist.append( ('UNKNOWN', line) )
         return (eventlist, buf)
 
@@ -1003,8 +1003,10 @@ class RESTError(MeshyError):
 #
 
 logd = _logger.debug
-logw = _logger.warning
+logi = _logger.info
+logw = _logger.warning  # Default log output level
 loge = _logger.error
+logc = _logger.critical
 
 
 DEBUG_HTTP = False

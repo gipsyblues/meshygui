@@ -36,6 +36,11 @@ DEFAULT_INSTANCEPATH='~/meshy/serval'
 
 import logging
 _logger = logging.getLogger('meshygui')
+logging.basicConfig(
+        format='%(asctime)s:%(levelname)s:%(name)s:%(funcName)s:%(message)s',
+        datefmt = '%H:%M:%S',
+        #level=logging.DEBUG,
+        )
 
 try:
     import tkinter as tk
@@ -60,11 +65,6 @@ COLORS = {
 
 
 def main(argv):
-    logging.basicConfig(
-                    format='%(asctime)s:%(levelname)s:%(name)s:%(funcName)s:%(message)s',
-                    datefmt = '%H:%M:%S',
-                    level=logging.DEBUG,
-                    )
     if len(argv) > 1:
         instancepath = argv[1]
     else:
