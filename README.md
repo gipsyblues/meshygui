@@ -2,8 +2,8 @@
 Meshy: A Desktop interface for a Serval mesh
 =============================================
 
-Version: 0.2.0
-21 January 2016
+Version: 0.2.1
+22 Oct 2017
 
 Meshy is a tool to use, monitor and manipulate your local node on a
 [Serval mesh network][]. You can see peers you're connected to, send and
@@ -11,8 +11,8 @@ receive MeshMS messages, start and stop the serval daemon and easily run
 serval commands.
 
 The software is written using the Python programming language and uses the
-Tk graphical toolkit and so should run on any system which has Python 2.7
-or Python 3.4.
+Tk graphical toolkit and so should run on any system which has Python 2.7,
+Python 3.4 or newer.
 
 All advice and assistance to improve the software will be gratefully received,
 as will code reviews, bug reports, patches and any other contributions.
@@ -64,7 +64,7 @@ mailing list, so I should see any messages posted there, or email me at
 License
 --------
 
-Copyright 2015-2016 Kevin Steen
+Copyright 2015-2017 Kevin Steen
 
 Unless otherwise indicated, all source code is Free Software. You can
 redistribute it and/or modify it under the terms of the GNU Affero

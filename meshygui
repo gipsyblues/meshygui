@@ -29,7 +29,7 @@ otherwise : ~/meshy/serval
 from __future__ import print_function, unicode_literals
 
 
-__version_info__ = (0, 2, 0)
+__version_info__ = (0, 2, 1)
 
 DEFAULT_INSTANCEPATH='~/meshy/serval'
 
@@ -173,6 +173,13 @@ class MainWindow(object):
                                            self.instancepath)
 
     def _init_mainframe(self, parent):
+        '''PanedWindow
+             - treepane
+             - mainpane
+               - Notebook
+                 - peer_tab
+                 - output_tab
+        '''
         pw = ttk.PanedWindow(parent, orient=tk.HORIZONTAL)  # Doesn't support border
         pw.pack(fill=tk.BOTH, expand=1)
 
@@ -184,11 +191,11 @@ class MainWindow(object):
         pw.add(mainpane, weight=4)
 
         self.tabs_w = ttk.Notebook(mainpane)
-        self.tabs_w.grid(sticky='nw')
+        self.tabs_w.pack(fill=tk.BOTH, expand=1)
 
         self.peer_tab_obj = PeerTab(self.tabs_w, self)
         self.output_tab_obj = OutputTab(self.tabs_w, self)
-        self.output_tab_obj.show()
+        self.peer_tab_obj.show()
 
     def cmd_quit(self, *ign):
         logd('cmd_quit called')
@@ -435,11 +442,11 @@ class OutputTab(object):
     def __init__(self, parent_notebook, main_obj):
         self.main_obj = main_obj
         self.parent_notebook = parent_notebook
-        self.frame = ttk.Frame(parent_notebook, padding=10)
-        self.frame.pack(fill=tk.BOTH)
+        self.frame = ttk.Frame(parent_notebook)#, padding=10, borderwidth=10, relief='ridge')
+        self.frame.pack(fill=tk.BOTH, expand=1)
         parent_notebook.add(self.frame, text='Output')
 
-        self.output_w = tk.Text(self.frame, width=80, height=31)
+        self.output_w = tk.Text(self.frame)#, width=80, height=31)
         self.output_w.grid(row=0, column=0, sticky=tk.NSEW)
         self.output_w.insert('1.0', 'Output will appear here.')
 
@@ -447,6 +454,9 @@ class OutputTab(object):
                                command=self.output_w.yview)
         scroll.grid(row=0, column=1, sticky=tk.NS)
         self.output_w.configure(yscrollcommand=scroll.set)
+
+        self.frame.columnconfigure(0, weight=1)
+        self.frame.rowconfigure(0, weight=1)
 
     def append_text(self, text):
         '''Append text to the contents of the output window'''
@@ -473,8 +483,8 @@ class PeerTab(object):
         self.sid = None
         self.msg_w = None  # Message display widget
 
-        self.frame = ttk.Frame(parent_notebook, padding=10)
-        self.frame.pack(fill=tk.BOTH)
+        self.frame = ttk.Frame(parent_notebook, padding=10)#, borderwidth=10, relief='ridge')
+        self.frame.pack(fill=tk.BOTH, expand=1)
         parent_notebook.add(self.frame, text='Peer')
 
         self.header_var = tk.StringVar()
@@ -487,18 +497,21 @@ class PeerTab(object):
         self._init_ui(self.frame)
 
     def _init_ui(self, parent):
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(5, weight=1)
         lbl = ttk.Label(parent, textvariable=self.header_var)
         lbl.grid(row=1, column=0, columnspan=5, padx=5, pady=5, sticky=tk.W)
 
         # --- Message display ---
         frm = ttk.Frame(parent)#, borderwidth=10, relief='ridge')
         frm.grid(row=5, column=0, columnspan=5, sticky=tk.NSEW)
-        self.msg_w = tk.Text(frm, state='disabled', wrap='word',
-                             width=80, height=20)
+        self.msg_w = tk.Text(frm, state='disabled', wrap='word')
         self.msg_w.grid(row=0, column=0, sticky=tk.NSEW)
         scroll = ttk.Scrollbar(frm, orient=tk.VERTICAL, command=self.msg_w.yview)
         scroll.grid(row=0, column=1, sticky=tk.NS)
         self.msg_w.configure(yscrollcommand=scroll.set)
+        frm.columnconfigure(0, weight=1)
+        frm.rowconfigure(0, weight=1)
         self.msg_w.tag_configure('theirtext',justify='right',
             background=COLORS['theirtext'])
         self.msg_w.tag_configure('mytext',
