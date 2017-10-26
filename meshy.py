@@ -336,24 +336,27 @@ class SID(object):
     '''Serval Identity
     Attributes:
         sid
+        identity
         did
         name
     '''
-    def __init__(self, sid=None, did=None, name=None, mapping=None):
+    def __init__(self, sid=None, identity=None, did=None, name=None, mapping=None):
         if sid:
             self.sid = sid
+            self.identity = identity
             self.did = did
             self.name = name
         else:
             self.sid = mapping['sid']
+            self.identity = mapping['identity']
             self.did = mapping.get('did')
             self.name = mapping.get('name')
         if not self.name:
             self.name = '[sid:{}*]'.format(self.sid[:10])
 
     def __repr__(self):
-        return 'SID(%r, did=%r, name=%r)' % (
-               self.sid, self.did, self.name)
+        return 'SID(%r, identity=%r, did=%r, name=%r)' % (
+               self.sid, self.identity, self.did, self.name)
 
     def __str__(self):
         return self.name
@@ -377,7 +380,7 @@ class Keyring(object):
         self._api = api
         self._SIDlist = []
         for d in idlist:
-            self._SIDlist.append(d)
+            self._SIDlist.append(SID(mapping=d))
             logd('Keyring.init adding sid:%s', d)
 
     def create_SID(self, pin=None):

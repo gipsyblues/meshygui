@@ -403,16 +403,13 @@ class DaemonController(object):
 
     def _init_from_running_servald(self):
         self._init_monitor_socket(self.servald)
-        # TODO: Create a method on MainWindow:
-        #~ curr_id = self.servald.keyring[0]
-        #~ logi('Current Id:%s', curr_id)
-        curr_id = self.servald.id_self
-        if curr_id:
+        try:
+            curr_id = self.servald.keyring[0]
             logd('Current id:%s', curr_id)
-            self.main_obj.set_current_id(curr_id)
-        else:  # Generate an id
+        except IndexError:
             curr_id = self.servald.keyring.create_SID()
             logi('Generated a new ID:%s' % curr_id)
+        self.main_obj.set_current_id(curr_id)
         self.indicator['style'] = 'running.ServaldFrame.TLabelframe'
 
     def _init_monitor_socket(self, servald):
