@@ -199,7 +199,8 @@ class MainWindow(object):
 
     def cmd_quit(self, *ign):
         logd('cmd_quit called')
-        self.root.quit()
+        self.root.destroy()
+        #self.root.quit()
 
     def set_current_id(self, sid):
         self.current_id = sid
@@ -296,15 +297,15 @@ class DaemonController(object):
                 self.main_obj.output('Unable to initialise serval. Please check '
                     'the serval logs for details')
                 messagebox.showerror(
-                    title='Cannot execute `servald`',
+                    title='Fatal Error',
                     message='Cannot execute `servald`',
                     detail='The executable `servald` must be in your '
                         'PATH or in the current directory.',
                     icon='error',
                     )
-                res = 1
-        if res == 0:
-            self._init_from_running_servald()
+                self.main_obj.cmd_quit()  # Terminate app
+                return
+        self._init_from_running_servald()
         parent['text'] = ' %s ' % self.servald.instancepath
 
     def cmd_run_servalcmd(self, *ign):
