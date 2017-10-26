@@ -288,7 +288,7 @@ class DaemonController(object):
             self.servald = meshy.Servald(instancepath=instancepath,
                                          binpath='./servald').start()
             res, out = self.servald.exec_cmd(['status'])
-        except (meshy.ServalError, FileNotFoundError):
+        except (meshy.ServalError, OSError):
             try:
                 self.servald = meshy.Servald(instancepath=instancepath).start()
                 res, out = self.servald.exec_cmd(['status'])
